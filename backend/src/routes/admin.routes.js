@@ -10,6 +10,7 @@ const { upload } = require("../config/cloudinary.js");
 const ProductController = require("../controllers/product.controller.js");
 const { updateOrderStatusSchema } = require("../schemas/order.schema.js");
 const OrderController = require("../controllers/order.controller.js");
+const AdminStoreController = require("../controllers/adminStore.controller.js");
 
 router.use(verifyToken, requireRole("store_admin", "staff"));
 
@@ -34,5 +35,18 @@ router.patch(
   validate(updateOrderStatusSchema),
   OrderController.updateOrderStatus,
 );
+
+router.get("/settings", AdminStoreController.getSettings);
+router.put("/settings", AdminStoreController.updateSettings);
+router.get("/categories", AdminStoreController.getCategories);
+router.post("/categories", AdminStoreController.createCategory);
+router.put(
+  "/products/:id",
+  validate(createProductSchema),
+  ProductController.updateProduct,
+);
+router.get("/subcategories", AdminStoreController.getSubcategories);
+router.post("/subcategories", AdminStoreController.createSubcategory);
+router.get("/dashboard", AdminStoreController.getDashboardStats);
 
 module.exports = router;

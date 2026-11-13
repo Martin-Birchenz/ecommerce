@@ -1,13 +1,14 @@
 const ProductRepository = require("../repositories/product.repository.js");
 
 const ProductController = {
-  // Público: catálogo activo filtrado por tienda
+  // 1. Público: catálogo activo filtrado por tienda, categoría, subcategoría o búsqueda
   getPublicCatalog: async (req, res, next) => {
     try {
-      const { category, search, featured } = req.query;
+      const { category, subcategory, search, featured } = req.query;
       const products = await ProductRepository.findAllByStore(req.storeId, {
         onlyActive: true,
         categorySlug: category,
+        subcategorySlug: subcategory,
         search,
         featured,
       });
@@ -17,7 +18,8 @@ const ProductController = {
     }
   },
 
-  // Admin: lista todos (activos y pausados)
+  // 2. Admin: lista todos los productos de la tienda (activos y ocultos)
+
   getAdminProducts: async (req, res, next) => {
     try {
       const products = await ProductRepository.findAllByStore(req.storeId, {
@@ -29,7 +31,7 @@ const ProductController = {
     }
   },
 
-  // Admin: crea producto + variantes + imágenes
+  // 3. Admin: crea producto + variantes + imágenes
   createProduct: async (req, res, next) => {
     try {
       const productId = await ProductRepository.createWithRelations(
@@ -46,7 +48,25 @@ const ProductController = {
     }
   },
 
-  // Admin: subida de imágenes a Cloudinary
+  // 4. Admin: actualiza producto + variantes + imágenes de forma integral
+  updateProduct: async (req, res, next) => {
+    try {
+      const productId = Number(req.params.id);
+      await ProductRepository.updateWithRelations(
+        req.storeId,
+        productId,
+        req.body,
+      );
+      res.status(200).json({
+        success: true,
+        message: "Producto actualizado correctamente",
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // 5. Admin: subida de imágenes a Cloudinary
   uploadImages: async (req, res, next) => {
     try {
       if (!req.files || req.files.length === 0) {
@@ -64,7 +84,7 @@ const ProductController = {
     }
   },
 
-  // Admin: actualización rápida de stock por variante
+  // 6. Admin: actualización rápida de stock por variante
   updateStock: async (req, res, next) => {
     try {
       const { variantId } = req.params;
@@ -85,7 +105,7 @@ const ProductController = {
     }
   },
 
-  // Admin: toggle rápido is_active / is_featured
+  // 7. Admin: toggle rápido de visibilidad (is_active) o destacado (is_featured)
   toggleFlag: async (req, res, next) => {
     try {
       const { id } = req.params;

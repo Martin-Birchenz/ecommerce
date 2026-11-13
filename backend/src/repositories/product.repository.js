@@ -12,7 +12,7 @@ const slugify = (text) =>
 const ProductRepository = {
   findAllByStore: async (
     storeId,
-    { onlyActive = true, categorySlug, search, featured } = {},
+    { onlyActive = true, categorySlug, subcategorySlug, search, featured } = {},
   ) => {
     let query = `
       SELECT p.*, c.name AS category_name, c.slug AS category_slug,
@@ -38,6 +38,14 @@ const ProductRepository = {
       query += " AND (p.name LIKE ? OR p.description LIKE ?)";
       const term = `%${search}%`;
       params.push(term, term);
+    }
+    if (categorySlug) {
+      query += " AND c.slug = ?";
+      params.push(categorySlug);
+    }
+    if (subcategorySlug) {
+      query += " AND sub.slug = ?";
+      params.push(subcategorySlug);
     }
 
     query += " ORDER BY p.is_featured DESC, p.created_at DESC";
@@ -160,6 +168,138 @@ const ProductRepository = {
       [value ? 1 : 0, productId, storeId],
     );
     return result.affectedRows > 0;
+  },
+
+  updateWithRelations: async (storeId, productId, data) => {
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+
+      // 1. Verificar pertenencia al comercio
+      const [existing] = await connection.query(
+        "SELECT id FROM products WHERE id = ? AND store_id = ? LIMIT 1",
+        [productId, storeId],
+      );
+      if (existing.length === 0) {
+        throw Object.assign(new Error("Producto no encontrado"), {
+          statusCode: 404,
+        });
+      }
+
+      // 2. Actualizar cabecera del producto
+      await connection.query(
+        `UPDATE products SET
+          category_id = ?,
+          subcategory_id = ?,
+          name = ?,
+          description = ?,
+          base_price = ?,
+          unit_type = ?,
+          min_step = ?,
+          is_featured = ?,
+          is_active = ?
+         WHERE id = ? AND store_id = ?`,
+        [
+          data.category_id,
+          data.subcategory_id || null,
+          data.name,
+          data.description || null,
+          data.base_price,
+          data.unit_type,
+          data.min_step,
+          data.is_featured ? 1 : 0,
+          data.is_active ? 1 : 0,
+          productId,
+          storeId,
+        ],
+      );
+
+      // 3. Sincronizar variantes sin romper claves foráneas de pedidos históricos
+      const incomingIds = data.variants.filter((v) => v.id).map((v) => v.id);
+
+      if (incomingIds.length > 0) {
+        await connection.query(
+          `UPDATE product_variants SET is_active = 0 
+           WHERE product_id = ? AND store_id = ? AND id NOT IN (?)`,
+          [productId, storeId, incomingIds],
+        );
+      } else {
+        await connection.query(
+          `UPDATE product_variants SET is_active = 0 
+           WHERE product_id = ? AND store_id = ?`,
+          [productId, storeId],
+        );
+      }
+
+      for (const v of data.variants) {
+        if (v.id) {
+          await connection.query(
+            `UPDATE product_variants SET
+              sku = ?, attribute_name = ?, attribute_value = ?,
+              price_override = ?, stock = ?, min_stock_alert = ?, is_active = 1
+             WHERE id = ? AND product_id = ? AND store_id = ?`,
+            [
+              v.sku || null,
+              v.attribute_name,
+              v.attribute_value,
+              v.price_override ?? null,
+              v.stock,
+              v.min_stock_alert,
+              v.id,
+              productId,
+              storeId,
+            ],
+          );
+        } else {
+          await connection.query(
+            `INSERT INTO product_variants
+             (store_id, product_id, sku, attribute_name, attribute_value, price_override, stock, min_stock_alert, is_active)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+            [
+              storeId,
+              productId,
+              v.sku || null,
+              v.attribute_name,
+              v.attribute_value,
+              v.price_override ?? null,
+              v.stock,
+              v.min_stock_alert,
+            ],
+          );
+        }
+      }
+
+      // 4. Reemplazar imágenes si se enviaron
+      if (Array.isArray(data.images)) {
+        await connection.query(
+          "DELETE FROM product_images WHERE product_id = ? AND store_id = ?",
+          [productId, storeId],
+        );
+        for (let i = 0; i < data.images.length; i++) {
+          const img = data.images[i];
+          await connection.query(
+            `INSERT INTO product_images (store_id, product_id, image_url, public_id, is_primary, sort_order)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            [
+              storeId,
+              productId,
+              img.image_url,
+              img.public_id || null,
+              i === 0 || img.is_primary ? 1 : 0,
+              i,
+            ],
+          );
+        }
+      }
+
+      await connection.commit();
+      return true;
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
   },
 };
 

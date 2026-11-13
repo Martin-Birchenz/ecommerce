@@ -80,6 +80,32 @@ const SuperAdminController = {
       connection.release();
     }
   },
+
+  toggleStoreStatus: async (req, res, next) => {
+    try {
+      const storeId = Number(req.params.id);
+      const { plan_status } = req.body; // 'demo' | 'active' | 'suspended'
+
+      if (!["demo", "active", "suspended"].includes(plan_status)) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Estado de plan inválido" });
+      }
+
+      const isActive = plan_status === "suspended" ? 0 : 1;
+
+      await pool.query(
+        "UPDATE stores SET plan_status = ?, is_active = ? WHERE id = ?",
+        [plan_status, isActive, storeId],
+      );
+
+      res
+        .status(200)
+        .json({ success: true, message: "Estado del comercio actualizado" });
+    } catch (error) {
+      next(error);
+    }
+  },
 };
 
 module.exports = SuperAdminController;

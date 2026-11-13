@@ -17,4 +17,6 @@ router.post(
   SuperAdminController.createStore,
 );
 
+router.patch("/stores/:id/status", SuperAdminController.toggleStoreStatus);
+
 module.exports = router;
