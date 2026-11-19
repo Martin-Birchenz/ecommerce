@@ -4,10 +4,12 @@ const slugify = (text) =>
   text
     .toString()
     .toLowerCase()
+    .trim()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)+/g, "");
+    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/[\s_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 
 const ProductRepository = {
   findAllByStore: async (
@@ -289,6 +291,242 @@ const ProductRepository = {
               i,
             ],
           );
+        }
+      }
+
+      await connection.commit();
+      return true;
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  },
+
+  listByStore: async (storeId, { onlyActive = false } = {}) => {
+    let sql = `
+      SELECT p.*, c.name AS category_name, s.name AS subcategory_name
+      FROM products p
+      INNER JOIN categories c ON p.category_id = c.id
+      LEFT JOIN subcategories s ON p.subcategory_id = s.id
+      WHERE p.store_id = ?
+    `;
+    if (onlyActive) {
+      sql += " AND p.is_active = 1 AND c.is_active = 1";
+    }
+    sql += " ORDER BY p.is_featured DESC, p.created_at DESC";
+
+    const [products] = await pool.query(sql, [storeId]);
+    if (products.length === 0) return [];
+
+    const productIds = products.map((p) => p.id);
+    const placeholders = productIds.map(() => "?").join(",");
+
+    const [images] = await pool.query(
+      `SELECT id, product_id, image_url, is_primary, sort_order
+       FROM product_images
+       WHERE store_id = ? AND product_id IN (${placeholders})
+       ORDER BY is_primary DESC, sort_order ASC`,
+      [storeId, ...productIds],
+    );
+
+    const [variants] = await pool.query(
+      `SELECT id, product_id, sku, attribute_name, attribute_value, price_override, stock, min_stock_alert, is_active
+       FROM product_variants
+       WHERE store_id = ? AND product_id IN (${placeholders}) ${onlyActive ? "AND is_active = 1" : ""}
+       ORDER BY id ASC`,
+      [storeId, ...productIds],
+    );
+
+    return products.map((p) => ({
+      ...p,
+      images: images.filter((img) => img.product_id === p.id),
+      variants: variants.filter((v) => v.product_id === p.id),
+    }));
+  },
+
+  createProductWithVariants: async (storeId, data) => {
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+
+      const baseSlug = slugify(data.name);
+      const uniqueSlug = `${baseSlug}-${Date.now().toString().slice(-4)}`;
+
+      const [prodRes] = await connection.query(
+        `INSERT INTO products
+          (store_id, category_id, subcategory_id, name, slug, description, base_price, compare_at_price, unit_label, is_featured, is_active)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          storeId,
+          data.category_id,
+          data.subcategory_id || null,
+          data.name,
+          uniqueSlug,
+          data.description || null,
+          data.base_price,
+          data.compare_at_price ?? null,
+          data.unit_label || "Unidad",
+          data.is_featured ? 1 : 0,
+          data.is_active !== false ? 1 : 0,
+        ],
+      );
+
+      const productId = prodRes.insertId;
+
+      if (data.images && data.images.length > 0) {
+        for (let i = 0; i < data.images.length; i++) {
+          const img = data.images[i];
+          await connection.query(
+            `INSERT INTO product_images (store_id, product_id, image_url, is_primary, sort_order)
+             VALUES (?, ?, ?, ?, ?)`,
+            [
+              storeId,
+              productId,
+              img.image_url,
+              i === 0 || img.is_primary ? 1 : 0,
+              i,
+            ],
+          );
+        }
+      }
+
+      for (const v of data.variants) {
+        await connection.query(
+          `INSERT INTO product_variants
+            (store_id, product_id, sku, attribute_name, attribute_value, price_override, stock, min_stock_alert, is_active)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            storeId,
+            productId,
+            v.sku || null,
+            v.attribute_name || "Opción",
+            v.attribute_value,
+            v.price_override ?? null,
+            v.stock,
+            v.min_stock_alert ?? 3,
+            v.is_active !== false ? 1 : 0,
+          ],
+        );
+      }
+
+      await connection.commit();
+      return { id: productId, slug: uniqueSlug };
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  },
+
+  updateProduct: async (storeId, productId, data) => {
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+
+      await connection.query(
+        `UPDATE products SET
+          category_id = COALESCE(?, category_id),
+          subcategory_id = ?,
+          name = COALESCE(?, name),
+          description = COALESCE(?, description),
+          base_price = COALESCE(?, base_price),
+          compare_at_price = ?,
+          unit_label = COALESCE(?, unit_label),
+          is_featured = COALESCE(?, is_featured),
+          is_active = COALESCE(?, is_active)
+         WHERE id = ? AND store_id = ?`,
+        [
+          data.category_id ?? null,
+          data.subcategory_id ?? null,
+          data.name ?? null,
+          data.description ?? null,
+          data.base_price ?? null,
+          data.compare_at_price ?? null,
+          data.unit_label ?? null,
+          data.is_featured !== undefined ? (data.is_featured ? 1 : 0) : null,
+          data.is_active !== undefined ? (data.is_active ? 1 : 0) : null,
+          productId,
+          storeId,
+        ],
+      );
+
+      if (Array.isArray(data.images)) {
+        await connection.query(
+          "DELETE FROM product_images WHERE product_id = ? AND store_id = ?",
+          [productId, storeId],
+        );
+        for (let i = 0; i < data.images.length; i++) {
+          const img = data.images[i];
+          await connection.query(
+            `INSERT INTO product_images (store_id, product_id, image_url, is_primary, sort_order)
+             VALUES (?, ?, ?, ?, ?)`,
+            [
+              storeId,
+              productId,
+              img.image_url,
+              i === 0 || img.is_primary ? 1 : 0,
+              i,
+            ],
+          );
+        }
+      }
+
+      if (Array.isArray(data.variants)) {
+        const keepIds = data.variants.filter((v) => v.id).map((v) => v.id);
+        if (keepIds.length > 0) {
+          const placeholders = keepIds.map(() => "?").join(",");
+          await connection.query(
+            `UPDATE product_variants SET is_active = 0
+             WHERE product_id = ? AND store_id = ? AND id NOT IN (${placeholders})`,
+            [productId, storeId, ...keepIds],
+          );
+        }
+
+        for (const v of data.variants) {
+          if (v.id) {
+            await connection.query(
+              `UPDATE product_variants SET
+                sku = ?,
+                attribute_name = ?,
+                attribute_value = ?,
+                price_override = ?,
+                stock = ?,
+                min_stock_alert = ?,
+                is_active = ?
+               WHERE id = ? AND product_id = ? AND store_id = ?`,
+              [
+                v.sku || null,
+                v.attribute_name || "Opción",
+                v.attribute_value,
+                v.price_override ?? null,
+                v.stock,
+                v.min_stock_alert ?? 3,
+                v.is_active !== false ? 1 : 0,
+                v.id,
+                productId,
+                storeId,
+              ],
+            );
+          } else {
+            await connection.query(
+              `INSERT INTO product_variants
+                (store_id, product_id, sku, attribute_name, attribute_value, price_override, stock, min_stock_alert, is_active)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+              [
+                storeId,
+                productId,
+                v.sku || null,
+                v.attribute_name || "Opción",
+                v.attribute_value,
+                v.price_override ?? null,
+                v.stock,
+                v.min_stock_alert ?? 3,
+              ],
+            );
+          }
         }
       }
 

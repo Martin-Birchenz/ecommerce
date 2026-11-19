@@ -12,37 +12,72 @@ const OrderService = {
     try {
       await connection.beginTransaction();
 
-      // 1. Obtener configuración de envío y MP de esta tienda
+      // 1. Verificar configuración de medios de pago, envío y zonas de la tienda
       const [settingsRows] = await connection.query(
-        `SELECT flat_delivery_cost, mp_access_token, whatsapp_number, name AS store_name, slug
-         FROM store_settings st
-         INNER JOIN stores s ON s.id = st.store_id
-         WHERE st.store_id = ? LIMIT 1`,
+        `SELECT mp_enabled, transfer_enabled, cash_pickup_enabled,
+                delivery_enabled, pickup_enabled, flat_delivery_cost,
+                free_shipping_min, shipping_zones
+         FROM store_settings
+         WHERE store_id = ? LIMIT 1`,
         [storeId],
       );
-
       if (settingsRows.length === 0) {
-        throw Object.assign(
-          new Error("Configuración de tienda no encontrada"),
-          { statusCode: 404 },
+        const err = new Error("Configuración de tienda no encontrada");
+        err.statusCode = 404;
+        throw err;
+      }
+      const settings = settingsRows[0];
+
+      if (payload.payment_method === "mercadopago" && !settings.mp_enabled) {
+        const err = new Error("Este comercio no tiene habilitado Mercado Pago");
+        err.statusCode = 400;
+        throw err;
+      }
+      if (payload.payment_method === "transfer" && !settings.transfer_enabled) {
+        const err = new Error("Este comercio no acepta transferencias");
+        err.statusCode = 400;
+        throw err;
+      }
+      if (
+        payload.payment_method === "cash_pickup" &&
+        !settings.cash_pickup_enabled
+      ) {
+        const err = new Error("Este comercio no acepta pago en efectivo");
+        err.statusCode = 400;
+        throw err;
+      }
+      if (payload.delivery_type === "delivery" && !settings.delivery_enabled) {
+        const err = new Error("Este comercio no realiza envíos a domicilio");
+        err.statusCode = 400;
+        throw err;
+      }
+
+      // 2. Agrupar y ordenar variant_ids para evitar deadlocks en FOR UPDATE
+      const qtyByVariant = new Map();
+      for (const item of payload.items) {
+        qtyByVariant.set(
+          item.variant_id,
+          (qtyByVariant.get(item.variant_id) || 0) + item.quantity,
         );
       }
-      const storeConfig = settingsRows[0];
+      const sortedVariantIds = Array.from(qtyByVariant.keys()).sort(
+        (a, b) => a - b,
+      );
 
-      // 2. Bloquear y validar stock de cada variante con FOR UPDATE (ACID)
       let subtotal = 0;
       const resolvedItems = [];
 
-      for (const item of payload.items) {
+      for (const variantId of sortedVariantIds) {
+        const requestedQty = qtyByVariant.get(variantId);
+
         const [rows] = await connection.query(
-          `SELECT pv.id AS variant_id, pv.product_id, pv.attribute_name, pv.attribute_value,
-                  pv.price_override, pv.stock, pv.is_active AS variant_active,
-                  p.name AS product_name, p.base_price, p.is_active AS product_active
+          `SELECT pv.id AS variant_id, pv.stock, pv.price_override, pv.attribute_value, pv.is_active AS variant_active,
+                  p.id AS product_id, p.name AS product_name, p.base_price, p.is_active AS product_active
            FROM product_variants pv
            INNER JOIN products p ON pv.product_id = p.id
            WHERE pv.id = ? AND pv.store_id = ?
            FOR UPDATE`,
-          [item.variant_id, storeId],
+          [variantId, storeId],
         );
 
         if (
@@ -50,75 +85,171 @@ const OrderService = {
           !rows[0].variant_active ||
           !rows[0].product_active
         ) {
-          throw Object.assign(
-            new Error(
-              `Uno de los productos seleccionados ya no está disponible`,
-            ),
-            {
-              statusCode: 400,
-            },
+          const err = new Error(
+            `El producto seleccionado ya no está disponible (variante #${variantId})`,
           );
+          err.statusCode = 400;
+          throw err;
         }
 
-        const variant = rows[0];
-
-        if (Number(variant.stock) < Number(item.quantity)) {
-          throw Object.assign(
-            new Error(
-              `Stock insuficiente para "${variant.product_name} (${variant.attribute_value})". Disponible: ${variant.stock}`,
-            ),
-            { statusCode: 409 },
+        const v = rows[0];
+        if (v.stock < requestedQty) {
+          const err = new Error(
+            `Stock insuficiente para "${v.product_name} (${v.attribute_value})". Disponible: ${v.stock}`,
           );
+          err.statusCode = 409;
+          throw err;
         }
 
-        const unitPrice = Number(variant.price_override ?? variant.base_price);
-        const itemSubtotal = Number((unitPrice * item.quantity).toFixed(2));
-        subtotal = Number((subtotal + itemSubtotal).toFixed(2));
+        const unitPrice =
+          v.price_override !== null
+            ? Number(v.price_override)
+            : Number(v.base_price);
+        const lineSubtotal = Number((unitPrice * requestedQty).toFixed(2));
+        subtotal = Number((subtotal + lineSubtotal).toFixed(2));
 
         resolvedItems.push({
-          product_id: variant.product_id,
-          variant_id: variant.variant_id,
-          product_name_snapshot: variant.product_name,
-          variant_label_snapshot: `${variant.attribute_name}: ${variant.attribute_value}`,
-          quantity: item.quantity,
+          product_id: v.product_id,
+          variant_id: v.variant_id,
+          product_name_snapshot: v.product_name,
+          variant_label_snapshot: v.attribute_value,
+          quantity: requestedQty,
           unit_price: unitPrice,
-          subtotal: itemSubtotal,
+          subtotal: lineSubtotal,
         });
 
-        // Descontamos stock atómicamente para pedidos directos (WhatsApp / Transferencia)
-        if (payload.payment_method !== "mercadopago") {
-          await connection.query(
-            "UPDATE product_variants SET stock = stock - ? WHERE id = ? AND store_id = ?",
-            [item.quantity, variant.variant_id, storeId],
+        await connection.query(
+          "UPDATE product_variants SET stock = stock - ? WHERE id = ? AND store_id = ?",
+          [requestedQty, variantId, storeId],
+        );
+      }
+
+      // 3. Validar y descontar cupón si fue enviado
+      let appliedCouponCode = null;
+      let discountAmount = 0;
+
+      if (payload.coupon_code && payload.coupon_code.trim() !== "") {
+        const cleanCode = payload.coupon_code.toUpperCase().trim();
+        const [couponRows] = await connection.query(
+          `SELECT * FROM coupons
+           WHERE store_id = ? AND code = ? AND is_active = 1
+           FOR UPDATE`,
+          [storeId, cleanCode],
+        );
+
+        if (couponRows.length === 0) {
+          const err = new Error("El cupón ingresado no es válido");
+          err.statusCode = 400;
+          throw err;
+        }
+
+        const coupon = couponRows[0];
+        if (coupon.expires_at && new Date(coupon.expires_at) < new Date()) {
+          const err = new Error("El cupón ingresado ya venció");
+          err.statusCode = 400;
+          throw err;
+        }
+        if (
+          coupon.usage_limit !== null &&
+          coupon.used_count >= coupon.usage_limit
+        ) {
+          const err = new Error("El cupón alcanzó su límite de usos");
+          err.statusCode = 400;
+          throw err;
+        }
+        if (subtotal < Number(coupon.min_order_amount)) {
+          const err = new Error(
+            `El monto mínimo para este cupón es $${Number(coupon.min_order_amount).toLocaleString("es-AR")}`,
           );
+          err.statusCode = 400;
+          throw err;
+        }
+
+        appliedCouponCode = coupon.code;
+        discountAmount =
+          coupon.discount_type === "percentage"
+            ? Number(
+                ((subtotal * Number(coupon.discount_value)) / 100).toFixed(2),
+              )
+            : Math.min(subtotal, Number(coupon.discount_value));
+
+        await connection.query(
+          "UPDATE coupons SET used_count = used_count + 1 WHERE id = ?",
+          [coupon.id],
+        );
+      }
+
+      // 4. Calcular costo de envío (por zona elegida o tarifa plana, con regla de envío gratis)
+      const netMerchandiseTotal = Math.max(
+        0,
+        Number((subtotal - discountAmount).toFixed(2)),
+      );
+      let shippingCost = 0;
+      let resolvedShippingNotes = payload.shipping_notes || "";
+
+      if (payload.delivery_type === "delivery") {
+        let baseShipping = Number(settings.flat_delivery_cost || 0);
+
+        const zones =
+          typeof settings.shipping_zones === "string"
+            ? JSON.parse(settings.shipping_zones)
+            : settings.shipping_zones;
+
+        if (
+          Array.isArray(zones) &&
+          zones.length > 0 &&
+          payload.shipping_zone_name
+        ) {
+          const matchedZone = zones.find(
+            (z) =>
+              z.name.toLowerCase().trim() ===
+              payload.shipping_zone_name.toLowerCase().trim(),
+          );
+          if (matchedZone) {
+            baseShipping = Number(matchedZone.cost || 0);
+            resolvedShippingNotes =
+              `[Zona: ${matchedZone.name}] ${resolvedShippingNotes}`.trim();
+          }
+        }
+
+        if (
+          settings.free_shipping_min !== null &&
+          Number(settings.free_shipping_min) > 0 &&
+          netMerchandiseTotal >= Number(settings.free_shipping_min)
+        ) {
+          shippingCost = 0;
+        } else {
+          shippingCost = baseShipping;
         }
       }
 
-      const shippingCost =
-        payload.delivery_method === "local_delivery"
-          ? Number(storeConfig.flat_delivery_cost || 0)
-          : 0;
-      const totalAmount = Number((subtotal + shippingCost).toFixed(2));
-      const orderNumber = generateOrderNumber();
+      const totalAmount = Number(
+        (netMerchandiseTotal + shippingCost).toFixed(2),
+      );
+      const orderNumber = `ORD-${Date.now().toString().slice(-6)}-${Math.floor(10 + Math.random() * 89)}`;
 
-      // 3. Insertar cabecera del pedido
+      // 5. Insertar cabecera del pedido
       const [orderResult] = await connection.query(
-        `INSERT INTO orders 
-         (store_id, order_number, customer_name, customer_phone, customer_email,
-          delivery_method, delivery_address, customer_notes, payment_method,
-          subtotal, shipping_cost, total_amount, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+        `INSERT INTO orders
+          (store_id, order_number, customer_name, customer_phone, customer_email,
+           delivery_type, shipping_address, shipping_notes, payment_method, coupon_code,
+           status, subtotal, discount_amount, shipping_cost, total_amount)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)`,
         [
           storeId,
           orderNumber,
           payload.customer_name,
           payload.customer_phone,
           payload.customer_email || null,
-          payload.delivery_method,
-          payload.delivery_address || null,
-          payload.customer_notes || null,
+          payload.delivery_type,
+          payload.delivery_type === "delivery"
+            ? payload.shipping_address
+            : null,
+          resolvedShippingNotes || null,
           payload.payment_method,
+          appliedCouponCode,
           subtotal,
+          discountAmount,
           shippingCost,
           totalAmount,
         ],
@@ -126,88 +257,117 @@ const OrderService = {
 
       const orderId = orderResult.insertId;
 
-      // 4. Insertar detalle congelado
-      for (const line of resolvedItems) {
+      for (const item of resolvedItems) {
         await connection.query(
-          `INSERT INTO order_items 
-           (order_id, product_id, variant_id, product_name_snapshot, variant_label_snapshot, quantity, unit_price, subtotal)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO order_items
+            (store_id, order_id, product_id, variant_id, product_name_snapshot, variant_label_snapshot, quantity, unit_price, subtotal)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
+            storeId,
             orderId,
-            line.product_id,
-            line.variant_id,
-            line.product_name_snapshot,
-            line.variant_label_snapshot,
-            line.quantity,
-            line.unit_price,
-            line.subtotal,
+            item.product_id,
+            item.variant_id,
+            item.product_name_snapshot,
+            item.variant_label_snapshot,
+            item.quantity,
+            item.unit_price,
+            item.subtotal,
           ],
-        );
-      }
-
-      // 5. Si eligió Mercado Pago y el comercio tiene token configurado, crear preferencia
-      let mpInitPoint = null;
-      if (payload.payment_method === "mercadopago") {
-        if (!storeConfig.mp_access_token) {
-          throw Object.assign(
-            new Error("Este comercio aún no tiene habilitado Mercado Pago"),
-            {
-              statusCode: 400,
-            },
-          );
-        }
-
-        const client = new MercadoPagoConfig({
-          accessToken: storeConfig.mp_access_token,
-        });
-        const preference = new Preference(client);
-        const frontendBase = (
-          process.env.FRONTEND_URL || "http://localhost:5173"
-        )
-          .split(",")[0]
-          .trim();
-        const backendBase =
-          process.env.BACKEND_URL ||
-          `http://localhost:${process.env.PORT || 3000}`;
-
-        const mpResponse = await preference.create({
-          body: {
-            items: resolvedItems.map((i) => ({
-              title: `${i.product_name_snapshot} (${i.variant_label_snapshot})`,
-              quantity: Number(i.quantity),
-              unit_price: Number(i.unit_price),
-              currency_id: "ARS",
-            })),
-            external_reference: `${storeId}:${orderId}`,
-            notification_url: `${backendBase}/api/webhooks/mercadopago/${storeId}`,
-            back_urls: {
-              success: `${frontendBase}/t/${storeConfig.slug}?payment=success&order=${orderNumber}`,
-              failure: `${frontendBase}/t/${storeConfig.slug}?payment=failure&order=${orderNumber}`,
-              pending: `${frontendBase}/t/${storeConfig.slug}?payment=pending&order=${orderNumber}`,
-            },
-            auto_return: "approved",
-          },
-        });
-
-        mpInitPoint = mpResponse.init_point;
-        await connection.query(
-          "UPDATE orders SET mp_preference_id = ? WHERE id = ?",
-          [mpResponse.id, orderId],
         );
       }
 
       await connection.commit();
 
       return {
-        orderId,
-        orderNumber,
+        id: orderId,
+        order_number: orderNumber,
+        status: "pending",
         subtotal,
-        shippingCost,
-        totalAmount,
-        paymentMethod: payload.payment_method,
-        mpInitPoint,
+        discount_amount: discountAmount,
+        coupon_code: appliedCouponCode,
+        shipping_cost: shippingCost,
+        total_amount: totalAmount,
         items: resolvedItems,
       };
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  },
+
+  listOrdersByStore: async (storeId, { status } = {}) => {
+    let sql = `
+      SELECT *
+      FROM orders
+      WHERE store_id = ?
+    `;
+    const params = [storeId];
+
+    if (status && status !== "all") {
+      sql += " AND status = ?";
+      params.push(status);
+    }
+
+    sql += " ORDER BY created_at DESC";
+    const [orders] = await pool.query(sql, params);
+    if (orders.length === 0) return [];
+
+    const orderIds = orders.map((o) => o.id);
+    const placeholders = orderIds.map(() => "?").join(",");
+    const [items] = await pool.query(
+      `SELECT * FROM order_items WHERE store_id = ? AND order_id IN (${placeholders})`,
+      [storeId, ...orderIds],
+    );
+
+    return orders.map((o) => ({
+      ...o,
+      items: items.filter((i) => i.order_id === o.id),
+    }));
+  },
+
+  updateOrderStatus: async (storeId, orderId, newStatus) => {
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+
+      const [orders] = await connection.query(
+        "SELECT id, status FROM orders WHERE id = ? AND store_id = ? FOR UPDATE",
+        [orderId, storeId],
+      );
+      if (orders.length === 0) {
+        const err = new Error("Pedido no encontrado");
+        err.statusCode = 404;
+        throw err;
+      }
+
+      const currentStatus = orders[0].status;
+      if (currentStatus === newStatus) {
+        await connection.commit();
+        return { id: orderId, status: newStatus };
+      }
+
+      if (newStatus === "cancelled" && currentStatus !== "cancelled") {
+        const [items] = await connection.query(
+          "SELECT variant_id, quantity FROM order_items WHERE order_id = ? AND store_id = ?",
+          [orderId, storeId],
+        );
+        for (const item of items) {
+          await connection.query(
+            "UPDATE product_variants SET stock = stock + ? WHERE id = ? AND store_id = ?",
+            [item.quantity, item.variant_id, storeId],
+          );
+        }
+      }
+
+      await connection.query(
+        "UPDATE orders SET status = ? WHERE id = ? AND store_id = ?",
+        [newStatus, orderId, storeId],
+      );
+
+      await connection.commit();
+      return { id: orderId, status: newStatus };
     } catch (error) {
       await connection.rollback();
       throw error;

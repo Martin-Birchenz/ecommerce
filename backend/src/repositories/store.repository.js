@@ -9,7 +9,7 @@ const StoreRepository = {
         st.logo_url, st.banner_desktop_url, st.banner_mobile_url,
         st.hero_title, st.hero_subtitle,
         st.primary_color, st.secondary_color, st.accent_color,
-        st.background_color, st.surface_color, st.text_color,
+        st.background_color, st.surface_color, st.text_color, st.free_shipping_min, st.shipping_zones,
         st.font_heading, st.font_body, st.border_radius,
         st.bank_alias, st.bank_cbu, st.bank_holder_name,
         st.allow_pickup, st.allow_delivery, st.flat_delivery_cost,

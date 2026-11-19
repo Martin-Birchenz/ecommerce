@@ -106,6 +106,64 @@ const SuperAdminController = {
       next(error);
     }
   },
+
+  impersonateStore: async (req, res, next) => {
+    try {
+      const storeId = Number(req.params.id);
+
+      const [stores] = await pool.query(
+        "SELECT id, name, slug FROM stores WHERE id = ? LIMIT 1",
+        [storeId],
+      );
+      if (stores.length === 0) {
+        return res
+          .status(404)
+          .json({ success: false, message: "Comercio no encontrado" });
+      }
+      const store = stores[0];
+
+      // Buscamos el admin principal de esa tienda
+      const [admins] = await pool.query(
+        "SELECT id, name, email FROM users WHERE store_id = ? AND role = 'store_admin' LIMIT 1",
+        [storeId],
+      );
+
+      const targetUser = admins[0] || {
+        id: req.user.userId,
+        name: `Soporte (${store.name})`,
+        email: "soporte@saas.com",
+      };
+
+      const token = jwt.sign(
+        {
+          userId: targetUser.id,
+          storeId: store.id,
+          role: "store_admin",
+          impersonatedBy: req.user.userId,
+        },
+        process.env.JWT_SECRET,
+        { expiresIn: "4h" },
+      );
+
+      res.status(200).json({
+        success: true,
+        data: {
+          token,
+          user: {
+            id: targetUser.id,
+            name: targetUser.name,
+            email: targetUser.email,
+            role: "store_admin",
+            storeId: store.id,
+            storeSlug: store.slug,
+            storeName: store.name,
+          },
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
 };
 
 module.exports = SuperAdminController;

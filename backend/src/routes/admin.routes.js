@@ -11,6 +11,7 @@ const ProductController = require("../controllers/product.controller.js");
 const { updateOrderStatusSchema } = require("../schemas/order.schema.js");
 const OrderController = require("../controllers/order.controller.js");
 const AdminStoreController = require("../controllers/adminStore.controller.js");
+const CouponController = require("../controllers/coupon.controller.js");
 
 router.use(verifyToken, requireRole("store_admin", "staff"));
 
@@ -48,5 +49,11 @@ router.put(
 router.get("/subcategories", AdminStoreController.getSubcategories);
 router.post("/subcategories", AdminStoreController.createSubcategory);
 router.get("/dashboard", AdminStoreController.getDashboardStats);
+router.get("/coupons", CouponController.listAdminCoupons);
+router.post("/coupons", CouponController.createCoupon);
+router.patch("/coupons/:id/toggle", CouponController.toggleCoupon);
+router.put("/categories/:id", AdminStoreController.updateCategory);
+router.delete("/categories/:id", AdminStoreController.deleteCategory);
+router.delete("/subcategories/:id", AdminStoreController.deleteSubcategory);
 
 module.exports = router;

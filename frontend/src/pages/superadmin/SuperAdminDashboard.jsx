@@ -93,6 +93,18 @@ export default function SuperAdminDashboard() {
     );
   };
 
+  const handleImpersonate = async (storeId) => {
+    try {
+      const res = await api.post(`/superadmin/stores/${storeId}/impersonate`);
+      const { token, user } = res.data.data;
+      localStorage.setItem("token", token);
+      localStorage.setItem("user", JSON.stringify(user));
+      window.location.href = "/admin/dashboard";
+    } catch (err) {
+      alert(err.response?.data?.message || "No se pudo ingresar a la tienda");
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Topbar SuperAdmin */}
@@ -323,6 +335,14 @@ export default function SuperAdminDashboard() {
                     </div>
                   </div>
                 </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleImpersonate(store.id)}
+                  className="px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800"
+                >
+                  Administrar Tienda
+                </button>
 
                 <a
                   href={`/t/${s.slug}`}

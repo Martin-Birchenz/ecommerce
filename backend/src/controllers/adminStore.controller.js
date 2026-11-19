@@ -31,101 +31,115 @@ const AdminStoreController = {
   },
 
   updateSettings: async (req, res, next) => {
-    const connection = await pool.getConnection();
     try {
+      const storeId = req.storeId;
       const {
-        name,
-        whatsapp_number,
-        address,
         logo_url,
-        banner_desktop_url,
-        hero_title,
-        hero_subtitle,
+        banner_url,
         primary_color,
         secondary_color,
         accent_color,
         background_color,
-        surface_color,
-        text_color,
-        font_heading,
-        font_body,
-        border_radius,
-        bank_alias,
-        bank_cbu,
-        bank_holder_name,
-        allow_pickup,
-        allow_delivery,
+        font_family,
+        hero_title,
+        hero_subtitle,
+        whatsapp_number,
+        instagram_url,
+        address,
+        business_hours,
+        mp_enabled,
+        mp_access_token,
+        transfer_enabled,
+        transfer_alias,
+        transfer_cbu,
+        transfer_holder,
+        cash_pickup_enabled,
+        delivery_enabled,
+        pickup_enabled,
         flat_delivery_cost,
+        free_shipping_min,
+        shipping_zones,
       } = req.body;
 
-      await connection.beginTransaction();
+      const serializedZones =
+        shipping_zones === undefined
+          ? null
+          : shipping_zones === null
+            ? null
+            : JSON.stringify(shipping_zones);
 
-      if (name || whatsapp_number) {
-        await connection.query(
-          `UPDATE stores SET 
-            name = COALESCE(?, name),
-            whatsapp_number = COALESCE(?, whatsapp_number),
-            address = COALESCE(?, address)
-           WHERE id = ?`,
-          [name || null, whatsapp_number || null, address ?? null, req.storeId],
-        );
-      }
-
-      await connection.query(
+      await pool.query(
         `UPDATE store_settings SET
           logo_url = COALESCE(?, logo_url),
-          banner_desktop_url = COALESCE(?, banner_desktop_url),
-          hero_title = COALESCE(?, hero_title),
-          hero_subtitle = COALESCE(?, hero_subtitle),
+          banner_url = COALESCE(?, banner_url),
           primary_color = COALESCE(?, primary_color),
           secondary_color = COALESCE(?, secondary_color),
           accent_color = COALESCE(?, accent_color),
           background_color = COALESCE(?, background_color),
-          surface_color = COALESCE(?, surface_color),
-          text_color = COALESCE(?, text_color),
-          font_heading = COALESCE(?, font_heading),
-          font_body = COALESCE(?, font_body),
-          border_radius = COALESCE(?, border_radius),
-          bank_alias = COALESCE(?, bank_alias),
-          bank_cbu = COALESCE(?, bank_cbu),
-          bank_holder_name = COALESCE(?, bank_holder_name),
-          allow_pickup = COALESCE(?, allow_pickup),
-          allow_delivery = COALESCE(?, allow_delivery),
-          flat_delivery_cost = COALESCE(?, flat_delivery_cost)
+          font_family = COALESCE(?, font_family),
+          hero_title = COALESCE(?, hero_title),
+          hero_subtitle = COALESCE(?, hero_subtitle),
+          whatsapp_number = COALESCE(?, whatsapp_number),
+          instagram_url = COALESCE(?, instagram_url),
+          address = COALESCE(?, address),
+          business_hours = COALESCE(?, business_hours),
+          mp_enabled = COALESCE(?, mp_enabled),
+          mp_access_token = COALESCE(?, mp_access_token),
+          transfer_enabled = COALESCE(?, transfer_enabled),
+          transfer_alias = COALESCE(?, transfer_alias),
+          transfer_cbu = COALESCE(?, transfer_cbu),
+          transfer_holder = COALESCE(?, transfer_holder),
+          cash_pickup_enabled = COALESCE(?, cash_pickup_enabled),
+          delivery_enabled = COALESCE(?, delivery_enabled),
+          pickup_enabled = COALESCE(?, pickup_enabled),
+          flat_delivery_cost = COALESCE(?, flat_delivery_cost),
+          free_shipping_min = ?,
+          shipping_zones = COALESCE(?, shipping_zones)
          WHERE store_id = ?`,
         [
           logo_url ?? null,
-          banner_desktop_url ?? null,
-          hero_title ?? null,
-          hero_subtitle ?? null,
+          banner_url ?? null,
           primary_color ?? null,
           secondary_color ?? null,
           accent_color ?? null,
           background_color ?? null,
-          surface_color ?? null,
-          text_color ?? null,
-          font_heading ?? null,
-          font_body ?? null,
-          border_radius ?? null,
-          bank_alias ?? null,
-          bank_cbu ?? null,
-          bank_holder_name ?? null,
-          allow_pickup ?? null,
-          allow_delivery ?? null,
-          flat_delivery_cost ?? null,
-          req.storeId,
+          font_family ?? null,
+          hero_title ?? null,
+          hero_subtitle ?? null,
+          whatsapp_number ?? null,
+          instagram_url ?? null,
+          address ?? null,
+          business_hours ?? null,
+          mp_enabled !== undefined ? (mp_enabled ? 1 : 0) : null,
+          mp_access_token !== undefined ? mp_access_token || null : null,
+          transfer_enabled !== undefined ? (transfer_enabled ? 1 : 0) : null,
+          transfer_alias ?? null,
+          transfer_cbu ?? null,
+          transfer_holder ?? null,
+          cash_pickup_enabled !== undefined
+            ? cash_pickup_enabled
+              ? 1
+              : 0
+            : null,
+          delivery_enabled !== undefined ? (delivery_enabled ? 1 : 0) : null,
+          pickup_enabled !== undefined ? (pickup_enabled ? 1 : 0) : null,
+          flat_delivery_cost !== undefined ? Number(flat_delivery_cost) : null,
+          free_shipping_min !== undefined &&
+          free_shipping_min !== "" &&
+          free_shipping_min !== null
+            ? Number(free_shipping_min)
+            : null,
+          serializedZones,
+          storeId,
         ],
       );
 
-      await connection.commit();
-      res
-        .status(200)
-        .json({ success: true, message: "Diseño y configuración guardados" });
+      res.status(200).json({
+        success: true,
+        message: "Configuración de tienda actualizada correctamente",
+      });
     } catch (error) {
-      await connection.rollback();
       next(error);
-    } finally {
-      connection.release();
     }
   },
 
@@ -254,6 +268,61 @@ const AdminStoreController = {
           lowStockItems,
         },
       });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  updateCategory: async (req, res, next) => {
+    try {
+      const { name, sort_order, is_active } = req.body;
+      await pool.query(
+        `UPDATE categories SET
+          name = COALESCE(?, name),
+          sort_order = COALESCE(?, sort_order),
+          is_active = COALESCE(?, is_active)
+         WHERE id = ? AND store_id = ?`,
+        [
+          name ?? null,
+          sort_order ?? null,
+          is_active ?? null,
+          Number(req.params.id),
+          req.storeId,
+        ],
+      );
+      res.status(200).json({ success: true });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  deleteCategory: async (req, res, next) => {
+    try {
+      await pool.query("DELETE FROM categories WHERE id = ? AND store_id = ?", [
+        Number(req.params.id),
+        req.storeId,
+      ]);
+      res.status(200).json({ success: true });
+    } catch (error) {
+      // Si tiene productos asociados, MySQL lanza ER_ROW_IS_REFERENCED_2
+      if (error.code === "ER_ROW_IS_REFERENCED_2") {
+        return res.status(400).json({
+          success: false,
+          message:
+            "No podés eliminar esta categoría porque tiene productos asociados. Ocultala o reasigná sus productos.",
+        });
+      }
+      next(error);
+    }
+  },
+
+  deleteSubcategory: async (req, res, next) => {
+    try {
+      await pool.query(
+        "DELETE FROM subcategories WHERE id = ? AND store_id = ?",
+        [Number(req.params.id), req.storeId],
+      );
+      res.status(200).json({ success: true });
     } catch (error) {
       next(error);
     }

@@ -1,55 +1,80 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { AuthProvider } from "./context/AuthContext.jsx";
-import { StoreProvider } from "./context/StoreContext.jsx";
-import { CartProvider } from "./context/CartContext.jsx";
-import StoreLayout from "./layouts/StoreLayout.jsx";
-import StoreHome from "./pages/storefront/StoreHome.jsx";
+import StorefrontLayout from "./layouts/StorefrontLayout.jsx";
 import AdminLayout from "./layouts/AdminLayout.jsx";
-import Login from "./pages/admin/Login.jsx";
-import ThemeSettings from "./pages/admin/ThemeSettings.jsx";
-import Products from "./pages/admin/Products.jsx";
-import Orders from "./pages/admin/Orders.jsx";
-import SuperAdminDashboard from "./pages/superadmin/SuperAdminDashboard.jsx";
-import Dashboard from "./pages/admin/Dashboard.jsx";
 
-function StorefrontWrapper() {
-  return (
-    <StoreProvider>
-      <CartProvider>
-        <StoreLayout />
-      </CartProvider>
-    </StoreProvider>
-  );
-}
+import StoreHome from "./pages/storefront/StoreHome.jsx";
+import CheckoutReturn from "./pages/storefront/CheckoutReturn.jsx";
+
+import AdminLogin from "./pages/admin/Login.jsx";
+import Dashboard from "./pages/admin/Dashboard.jsx";
+import ThemeSettings from "./pages/admin/ThemeSettings.jsx";
+import Products from "./pages/admin/ProductsManager.jsx";
+import Orders from "./pages/admin/OrdersManager.jsx";
+import CouponsManager from "./pages/admin/CouponsManager.jsx";
+
+import SuperAdminLogin from "./pages/superadmin/SuperAdminLogin.jsx";
+import SuperAdminDashboard from "./pages/superadmin/SuperAdminDashboard.jsx";
+
+const RequireStoreAdmin = ({ children }) => {
+  const token = localStorage.getItem("token");
+  const user = JSON.parse(localStorage.getItem("user") || "{}");
+  if (!token || user.role !== "store_admin") {
+    return <Navigate to="/admin/login" replace />;
+  }
+  return children;
+};
+
+const RequireSuperAdmin = ({ children }) => {
+  const token = localStorage.getItem("token");
+  const user = JSON.parse(localStorage.getItem("user") || "{}");
+  if (!token || user.role !== "superadmin") {
+    return <Navigate to="/superadmin/login" replace />;
+  }
+  return children;
+};
 
 export default function App() {
   return (
-    <AuthProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/superadmin" element={<SuperAdminDashboard />} />
-          <Route path="/" element={<Navigate to="/t/demo" replace />} />
+    <BrowserRouter>
+      <Routes>
+        {/* 1. Tienda Pública Multi-Tenant ("Camaleón") */}
+        <Route path="/t/:slug" element={<StorefrontLayout />}>
+          <Route index element={<StoreHome />} />
+          <Route path="checkout/:status" element={<CheckoutReturn />} />
+        </Route>
 
-          {/* Tienda Pública Multi-Tenant */}
-          <Route path="/t/:slug" element={<StorefrontWrapper />}>
-            <Route index element={<StoreHome />} />
-          </Route>
+        {/* 2. Panel de Administración del Comercio */}
+        <Route path="/admin/login" element={<AdminLogin />} />
+        <Route
+          path="/admin"
+          element={
+            <RequireStoreAdmin>
+              <AdminLayout />
+            </RequireStoreAdmin>
+          }
+        >
+          <Route index element={<Navigate to="/admin/dashboard" replace />} />
+          <Route path="dashboard" element={<Dashboard />} />
+          <Route path="design" element={<ThemeSettings />} />
+          <Route path="products" element={<Products />} />
+          <Route path="orders" element={<Orders />} />
+          <Route path="coupons" element={<CouponsManager />} />
+        </Route>
 
-          {/* Panel Administrativo */}
-          <Route path="/admin/login" element={<Login />} />
-          <Route path="/admin" element={<AdminLayout />}>
-            <Route index element={<Navigate to="/admin/design" replace />} />
-            <Route path="design" element={<ThemeSettings />} />
-            <Route path="design" element={<ThemeSettings />} />
-            <Route path="products" element={<Products />} />
-            <Route path="orders" element={<Orders />} />
-            <Route index element={<Navigate to="/admin/dashboard" replace />} />
-            <Route path="dashboard" element={<Dashboard />} />
-          </Route>
+        {/* 3. Consola Maestra del Dueño del SaaS (SuperAdmin) */}
+        <Route path="/superadmin/login" element={<SuperAdminLogin />} />
+        <Route
+          path="/superadmin"
+          element={
+            <RequireSuperAdmin>
+              <SuperAdminDashboard />
+            </RequireSuperAdmin>
+          }
+        />
 
-          <Route path="*" element={<Navigate to="/t/demo" replace />} />
-        </Routes>
-      </BrowserRouter>
-    </AuthProvider>
+        {/* Fallback */}
+        <Route path="*" element={<Navigate to="/admin/login" replace />} />
+      </Routes>
+    </BrowserRouter>
   );
 }

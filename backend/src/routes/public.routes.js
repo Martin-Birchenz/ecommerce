@@ -6,6 +6,7 @@ const ProductController = require("../controllers/product.controller.js");
 const { validate } = require("../middlewares/validate.middleware.js");
 const { createOrderSchema } = require("../schemas/order.schema.js");
 const OrderController = require("../controllers/order.controller.js");
+const CouponController = require("../controllers/coupon.controller.js");
 
 // Todas las rutas acá adentro pasan primero por resolveTenant
 router.use(resolveTenant);
@@ -17,5 +18,6 @@ router.post(
   validate(createOrderSchema),
   OrderController.createPublicOrder,
 );
+router.post("/coupons/validate", CouponController.validatePublicCoupon);
 
 module.exports = router;

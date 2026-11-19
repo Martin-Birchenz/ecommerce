@@ -1,16 +1,30 @@
 import { useEffect, useState } from "react";
-import {
-  Plus,
-  Upload,
-  Star,
-  Eye,
-  EyeOff,
-  AlertTriangle,
-  Trash2,
-  FolderPlus,
-  Pencil,
-} from "lucide-react";
+import { Plus, Pencil, Trash2, X, Upload, FolderPlus } from "lucide-react";
 import api from "../../config/api.js";
+
+const emptyProductForm = {
+  id: null,
+  category_id: "",
+  subcategory_id: "",
+  name: "",
+  description: "",
+  base_price: "",
+  compare_at_price: "",
+  unit_label: "Unidad",
+  is_featured: false,
+  is_active: true,
+  images: [],
+  variants: [
+    {
+      attribute_name: "Opción",
+      attribute_value: "Estándar",
+      price_override: "",
+      stock: 10,
+      min_stock_alert: 3,
+      is_active: true,
+    },
+  ],
+};
 
 export default function Products() {
   const [products, setProducts] = useState([]);
@@ -18,49 +32,29 @@ export default function Products() {
   const [subcategories, setSubcategories] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState(null);
-
+  // Estados para crear categoría / subcategoría
   const [newCatName, setNewCatName] = useState("");
-  const [newSubcatName, setNewSubcatName] = useState("");
-  const [uploading, setUploading] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
+  const [newSubName, setNewSubName] = useState("");
+  const [newSubCatId, setNewSubCatId] = useState("");
 
-  const initialForm = {
-    category_id: "",
-    subcategory_id: "",
-    name: "",
-    description: "",
-    base_price: "",
-    unit_type: "unidad",
-    min_step: 1,
-    is_featured: false,
-    images: [],
-    variants: [
-      {
-        attribute_name: "Presentación",
-        attribute_value: "Única",
-        stock: 10,
-        min_stock_alert: 3,
-        price_override: null,
-      },
-    ],
-  };
+  // Estado modal producto
+  const [showModal, setShowModal] = useState(false);
+  const [form, setForm] = useState(emptyProductForm);
+  const [uploadingImg, setUploadingImg] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  const [form, setForm] = useState(initialForm);
-
-  const loadData = async () => {
+  const loadAll = async () => {
     setLoading(true);
     try {
       const [prodRes, catRes] = await Promise.all([
         api.get("/admin/products"),
         api.get("/admin/categories"),
       ]);
-      setProducts(prodRes.data.data || []);
-      const cats = catRes.data.data || [];
-      setCategories(cats);
-      if (cats.length > 0 && !form.category_id) {
-        setForm((prev) => ({ ...prev, category_id: cats[0].id }));
+      setProducts(prodRes.data.data);
+      setCategories(catRes.data.data.categories);
+      setSubcategories(catRes.data.data.subcategories);
+      if (catRes.data.data.categories.length > 0 && !newSubCatId) {
+        setNewSubCatId(catRes.data.data.categories[0].id);
       }
     } finally {
       setLoading(false);
@@ -68,708 +62,698 @@ export default function Products() {
   };
 
   useEffect(() => {
-    loadData();
+    loadAll();
   }, []);
-
-  // Cargar subcategorías cada vez que cambia la categoría seleccionada
-  useEffect(() => {
-    if (!form.category_id) {
-      setSubcategories([]);
-      return;
-    }
-    api
-      .get("/admin/subcategories", {
-        params: { category_id: form.category_id },
-      })
-      .then((res) => setSubcategories(res.data.data || []));
-  }, [form.category_id]);
 
   const handleCreateCategory = async (e) => {
     e.preventDefault();
     if (!newCatName.trim()) return;
-    const res = await api.post("/admin/categories", {
-      name: newCatName.trim(),
-    });
-    const created = res.data.data;
-    setCategories((prev) => [...prev, created]);
-    setForm((prev) => ({
-      ...prev,
-      category_id: created.id,
-      subcategory_id: "",
-    }));
-    setNewCatName("");
+    try {
+      await api.post("/admin/categories", { name: newCatName.trim() });
+      setNewCatName("");
+      loadAll();
+    } catch (err) {
+      alert(err.response?.data?.message || "No se pudo crear la categoría");
+    }
+  };
+
+  const handleDeleteCategory = async (catId, catName) => {
+    if (!confirm(`¿Eliminar la categoría "${catName}"?`)) return;
+    try {
+      await api.delete(`/admin/categories/${catId}`);
+      loadAll();
+    } catch (err) {
+      alert(err.response?.data?.message || "No se pudo eliminar la categoría");
+    }
   };
 
   const handleCreateSubcategory = async (e) => {
     e.preventDefault();
-    if (!form.category_id || !newSubcatName.trim()) return;
-    const res = await api.post("/admin/subcategories", {
-      category_id: Number(form.category_id),
-      name: newSubcatName.trim(),
-    });
-    const created = res.data.data;
-    setSubcategories((prev) => [...prev, created]);
-    setForm((prev) => ({ ...prev, subcategory_id: created.id }));
-    setNewSubcatName("");
+    if (!newSubName.trim() || !newSubCatId) return;
+    try {
+      await api.post("/admin/subcategories", {
+        category_id: Number(newSubCatId),
+        name: newSubName.trim(),
+      });
+      setNewSubName("");
+      loadAll();
+    } catch (err) {
+      alert(err.response?.data?.message || "No se pudo crear la subcategoría");
+    }
   };
 
-  const handleImageUpload = async (e) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-
-    const formData = new FormData();
-    Array.from(files).forEach((file) => formData.append("images", file));
-
-    setUploading(true);
+  const handleDeleteSubcategory = async (subId, subName) => {
+    if (!confirm(`¿Eliminar la subcategoría "${subName}"?`)) return;
     try {
-      const res = await api.post("/admin/products/upload", formData, {
+      await api.delete(`/admin/subcategories/${subId}`);
+      loadAll();
+    } catch (err) {
+      alert(
+        err.response?.data?.message || "No se pudo eliminar la subcategoría",
+      );
+    }
+  };
+
+  const openNewProduct = () => {
+    setForm({
+      ...emptyProductForm,
+      category_id: categories[0]?.id || "",
+    });
+    setShowModal(true);
+  };
+
+  const openEditProduct = (prod) => {
+    setForm({
+      id: prod.id,
+      category_id: prod.category_id,
+      subcategory_id: prod.subcategory_id || "",
+      name: prod.name,
+      description: prod.description || "",
+      base_price: prod.base_price,
+      compare_at_price: prod.compare_at_price ?? "",
+      unit_label: prod.unit_label || "Unidad",
+      is_featured: Boolean(prod.is_featured),
+      is_active: Boolean(prod.is_active),
+      images: prod.images || [],
+      variants:
+        prod.variants && prod.variants.length > 0
+          ? prod.variants.map((v) => ({
+              ...v,
+              price_override: v.price_override ?? "",
+              is_active: Boolean(v.is_active),
+            }))
+          : emptyProductForm.variants,
+    });
+    setShowModal(true);
+  };
+
+  const handleProductImageUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingImg(true);
+    try {
+      const fd = new FormData();
+      fd.append("image", file);
+      const res = await api.post("/admin/upload", fd, {
         headers: { "Content-Type": "multipart/form-data" },
       });
       setForm((prev) => ({
         ...prev,
-        images: [...prev.images, ...res.data.data],
+        images: [
+          ...prev.images,
+          {
+            image_url: res.data.data.url,
+            is_primary: prev.images.length === 0,
+          },
+        ],
       }));
-    } catch (err) {
-      alert(err.response?.data?.message || "Error subiendo imágenes");
+    } catch {
+      alert("Error al subir imagen");
     } finally {
-      setUploading(false);
+      setUploadingImg(false);
     }
   };
 
-  const removeImage = (index) => {
+  const updateVariant = (idx, field, value) => {
     setForm((prev) => ({
       ...prev,
-      images: prev.images.filter((_, i) => i !== index),
+      variants: prev.variants.map((v, i) =>
+        i === idx ? { ...v, [field]: value } : v,
+      ),
     }));
   };
 
   const addVariantRow = () => {
-    const defaultAttr = form.variants[0]?.attribute_name || "Talle";
     setForm((prev) => ({
       ...prev,
       variants: [
         ...prev.variants,
         {
-          attribute_name: defaultAttr,
+          attribute_name: prev.variants[0]?.attribute_name || "Opción",
           attribute_value: "",
-          stock: 5,
+          price_override: "",
+          stock: 0,
           min_stock_alert: 3,
-          price_override: null,
+          is_active: true,
         },
       ],
     }));
   };
 
-  const updateVariantRow = (index, field, value) => {
-    setForm((prev) => {
-      const copy = [...prev.variants];
-      copy[index] = { ...copy[index], [field]: value };
-      return { ...prev, variants: copy };
-    });
-  };
-
-  const removeVariantRow = (index) => {
+  const removeVariantRow = (idx) => {
     if (form.variants.length <= 1) return;
     setForm((prev) => ({
       ...prev,
-      variants: prev.variants.filter((_, i) => i !== index),
+      variants: prev.variants.filter((_, i) => i !== idx),
     }));
-  };
-
-  const startEditing = (product) => {
-    setEditingId(product.id);
-    const activeVars = product.variants?.filter((v) => v.is_active === 1) || [];
-    setForm({
-      category_id: product.category_id,
-      subcategory_id: product.subcategory_id || "",
-      name: product.name,
-      description: product.description || "",
-      base_price: product.base_price,
-      unit_type: product.unit_type,
-      min_step: product.min_step,
-      is_featured: product.is_featured === 1,
-      images: product.images || [],
-      variants:
-        activeVars.length > 0
-          ? activeVars.map((v) => ({
-              id: v.id,
-              attribute_name: v.attribute_name,
-              attribute_value: v.attribute_value,
-              stock: v.stock,
-              min_stock_alert: v.min_stock_alert,
-              price_override: v.price_override,
-            }))
-          : initialForm.variants,
-    });
-    setShowForm(true);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
-
-  const handleCloseForm = () => {
-    setShowForm(false);
-    setEditingId(null);
-    setForm({ ...initialForm, category_id: categories[0]?.id || "" });
   };
 
   const handleSaveProduct = async (e) => {
     e.preventDefault();
-    setSubmitting(true);
+    setSaving(true);
     try {
       const payload = {
-        ...form,
         category_id: Number(form.category_id),
         subcategory_id: form.subcategory_id
           ? Number(form.subcategory_id)
           : null,
+        name: form.name,
+        description: form.description || null,
         base_price: Number(form.base_price),
-        min_step: Number(form.min_step),
+        compare_at_price:
+          form.compare_at_price !== "" && form.compare_at_price !== null
+            ? Number(form.compare_at_price)
+            : null,
+        unit_label: form.unit_label || "Unidad",
+        is_featured: Boolean(form.is_featured),
+        is_active: Boolean(form.is_active),
+        images: form.images.map((img, i) => ({
+          image_url: img.image_url,
+          is_primary: i === 0,
+        })),
         variants: form.variants.map((v) => ({
           ...(v.id ? { id: v.id } : {}),
-          attribute_name: v.attribute_name,
+          attribute_name: v.attribute_name || "Opción",
           attribute_value: v.attribute_value,
+          price_override:
+            v.price_override !== "" && v.price_override !== null
+              ? Number(v.price_override)
+              : null,
           stock: Number(v.stock),
-          min_stock_alert: Number(v.min_stock_alert),
-          price_override: v.price_override ? Number(v.price_override) : null,
+          min_stock_alert: Number(v.min_stock_alert || 3),
+          is_active: v.is_active !== false,
         })),
       };
 
-      if (editingId) {
-        await api.put(`/admin/products/${editingId}`, payload);
+      if (form.id) {
+        await api.put(`/admin/products/${form.id}`, payload);
       } else {
         await api.post("/admin/products", payload);
       }
 
-      handleCloseForm();
-      await loadData();
+      setShowModal(false);
+      loadAll();
     } catch (err) {
-      alert(err.response?.data?.message || "Revisá los datos del producto");
+      alert(err.response?.data?.message || "Error al guardar producto");
     } finally {
-      setSubmitting(false);
+      setSaving(false);
     }
   };
 
-  const handleToggleFlag = async (productId, field, currentValue) => {
-    await api.patch(`/admin/products/${productId}/toggle`, {
-      field,
-      value: !currentValue,
-    });
-    setProducts((prev) =>
-      prev.map((p) =>
-        p.id === productId ? { ...p, [field]: currentValue ? 0 : 1 } : p,
-      ),
-    );
-  };
-
-  const handleQuickStock = async (variantId, newStock) => {
-    await api.patch(`/admin/variants/${variantId}/stock`, {
-      stock: Number(newStock),
-    });
-    setProducts((prev) =>
-      prev.map((p) => ({
-        ...p,
-        variants: p.variants.map((v) =>
-          v.id === variantId ? { ...v, stock: Number(newStock) } : v,
-        ),
-      })),
-    );
-  };
+  const filteredSubsForModal = subcategories.filter(
+    (s) => String(s.category_id) === String(form.category_id),
+  );
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">
             Productos y Stock
           </h1>
           <p className="text-sm text-slate-500">
-            Administrá tu catálogo, categorías, variantes y alertas de
-            reposición.
+            Administrá tus categorías, precios, descuentos y variantes de
+            inventario.
           </p>
         </div>
-
         <button
-          onClick={() => (showForm ? handleCloseForm() : setShowForm(true))}
-          className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-900 text-white text-sm font-semibold rounded-lg hover:bg-slate-800 cursor-pointer"
+          type="button"
+          onClick={openNewProduct}
+          disabled={categories.length === 0}
+          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 disabled:opacity-40"
         >
-          <Plus className="w-4 h-4" />
-          {showForm ? "Cerrar Formulario" : "Nuevo Producto"}
+          <Plus className="w-4 h-4" /> Nuevo Producto
         </button>
       </div>
 
-      {/* Alta Rápida de Categorías y Subcategorías */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <form
-          onSubmit={handleCreateCategory}
-          className="bg-white border rounded-xl p-3.5 flex items-center gap-2 text-sm"
-        >
-          <FolderPlus className="w-4 h-4 text-slate-500 shrink-0" />
-          <input
-            type="text"
-            placeholder="Nueva categoría madre..."
-            value={newCatName}
-            onChange={(e) => setNewCatName(e.target.value)}
-            className="flex-1 px-2.5 py-1.5 border rounded-lg text-xs"
-          />
-          <button
-            type="submit"
-            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-900 font-semibold rounded-lg text-xs cursor-pointer"
-          >
-            + Categoría
-          </button>
-        </form>
+      {/* Gestor de Categorías y Subcategorías */}
+      <div className="bg-white border rounded-xl p-4 space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <form onSubmit={handleCreateCategory} className="flex gap-2">
+            <input
+              type="text"
+              placeholder="Nueva categoría (ej: Vinos Tintos)"
+              value={newCatName}
+              onChange={(e) => setNewCatName(e.target.value)}
+              className="flex-1 px-3 py-2 border rounded-lg text-sm"
+            />
+            <button
+              type="submit"
+              className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-bold inline-flex items-center gap-1"
+            >
+              <FolderPlus className="w-4 h-4" /> Categoría
+            </button>
+          </form>
 
-        <form
-          onSubmit={handleCreateSubcategory}
-          className="bg-white border rounded-xl p-3.5 flex items-center gap-2 text-sm"
-        >
-          <input
-            type="text"
-            placeholder="Nueva subcategoría (para la cat. elegida)..."
-            value={newSubcatName}
-            onChange={(e) => setNewSubcatName(e.target.value)}
-            className="flex-1 px-2.5 py-1.5 border rounded-lg text-xs"
-          />
-          <button
-            type="submit"
-            disabled={!form.category_id}
-            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-900 font-semibold rounded-lg text-xs cursor-pointer disabled:opacity-40"
-          >
-            + Subcategoría
-          </button>
-        </form>
+          <form onSubmit={handleCreateSubcategory} className="flex gap-2">
+            <select
+              value={newSubCatId}
+              onChange={(e) => setNewSubCatId(e.target.value)}
+              className="px-3 py-2 border rounded-lg text-sm bg-white"
+            >
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+            <input
+              type="text"
+              placeholder="Subcategoría (ej: Malbec)"
+              value={newSubName}
+              onChange={(e) => setNewSubName(e.target.value)}
+              className="flex-1 px-3 py-2 border rounded-lg text-sm"
+            />
+            <button
+              type="submit"
+              disabled={categories.length === 0}
+              className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-bold disabled:opacity-40"
+            >
+              + Sub
+            </button>
+          </form>
+        </div>
+
+        {/* Chips de Categorías y Subcategorías con borrado */}
+        {categories.length > 0 && (
+          <div className="flex flex-wrap gap-2 pt-2 border-t">
+            {categories.map((cat) => {
+              const childSubs = subcategories.filter(
+                (s) => String(s.category_id) === String(cat.id),
+              );
+              return (
+                <div
+                  key={cat.id}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-50 border text-xs"
+                >
+                  <span className="font-bold text-slate-800">{cat.name}</span>
+                  {childSubs.length > 0 && (
+                    <span className="text-slate-400">
+                      (
+                      {childSubs.map((s, idx) => (
+                        <span key={s.id}>
+                          {idx > 0 && ", "}
+                          {s.name}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleDeleteSubcategory(s.id, s.name)
+                            }
+                            title={`Eliminar ${s.name}`}
+                            className="ml-0.5 text-red-400 hover:text-red-600 font-bold"
+                          >
+                            &times;
+                          </button>
+                        </span>
+                      ))}
+                      )
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteCategory(cat.id, cat.name)}
+                    title={`Eliminar categoría ${cat.name}`}
+                    className="ml-1 text-slate-400 hover:text-red-600"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
-      {/* Formulario de Alta / Edición de Producto */}
-      {showForm && (
-        <form
-          onSubmit={handleSaveProduct}
-          className="bg-white border rounded-xl p-5 space-y-5 text-sm shadow-sm"
-        >
-          <h2 className="font-bold text-base text-slate-900 border-b pb-2">
-            {editingId ? "Editar Producto" : "Cargar Nuevo Producto"}
-          </h2>
+      {/* Tabla de Productos */}
+      {loading ? (
+        <p className="text-sm text-slate-500">Cargando catálogo...</p>
+      ) : (
+        <div className="bg-white border rounded-xl overflow-x-auto">
+          <table className="w-full text-sm text-left">
+            <thead className="bg-slate-50 border-b text-xs uppercase text-slate-500">
+              <tr>
+                <th className="px-4 py-3">Producto</th>
+                <th className="px-4 py-3">Categoría</th>
+                <th className="px-4 py-3">Precio</th>
+                <th className="px-4 py-3">Variantes y Stock</th>
+                <th className="px-4 py-3">Estado</th>
+                <th className="px-4 py-3 text-right">Acciones</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {products.map((p) => {
+                const totalStock = p.variants.reduce(
+                  (acc, v) => acc + Number(v.stock),
+                  0,
+                );
+                return (
+                  <tr key={p.id} className="hover:bg-slate-50/60">
+                    <td className="px-4 py-3 flex items-center gap-3">
+                      <img
+                        src={
+                          p.images?.[0]?.image_url ||
+                          "https://placehold.co/60x60?text=Img"
+                        }
+                        alt={p.name}
+                        className="w-10 h-10 rounded-lg object-cover border"
+                      />
+                      <div>
+                        <p className="font-semibold text-slate-900">{p.name}</p>
+                        <p className="text-xs text-slate-400">{p.unit_label}</p>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-slate-600">
+                      {p.category_name}
+                      {p.subcategory_name ? ` / ${p.subcategory_name}` : ""}
+                    </td>
+                    <td className="px-4 py-3">
+                      {p.compare_at_price &&
+                        Number(p.compare_at_price) > Number(p.base_price) && (
+                          <span className="block text-xs text-slate-400 line-through">
+                            $
+                            {Number(p.compare_at_price).toLocaleString("es-AR")}
+                          </span>
+                        )}
+                      <span className="font-bold text-slate-900">
+                        ${Number(p.base_price).toLocaleString("es-AR")}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-xs">
+                      <div className="flex flex-wrap gap-1">
+                        {p.variants.map((v) => (
+                          <span
+                            key={v.id}
+                            className={`px-2 py-0.5 rounded border ${
+                              v.stock <= v.min_stock_alert
+                                ? "bg-amber-50 border-amber-300 text-amber-800 font-semibold"
+                                : "bg-slate-50 text-slate-700"
+                            }`}
+                          >
+                            {v.attribute_value}: {v.stock}
+                          </span>
+                        ))}
+                      </div>
+                      <span className="text-[11px] text-slate-400 block mt-1">
+                        Total: {totalStock} u.
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                          p.is_active
+                            ? "bg-emerald-50 text-emerald-700"
+                            : "bg-slate-100 text-slate-500"
+                        }`}
+                      >
+                        {p.is_active ? "Activo" : "Oculto"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        type="button"
+                        onClick={() => openEditProduct(p)}
+                        className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* Modal Crear/Editar Producto */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 overflow-y-auto">
+          <form
+            onSubmit={handleSaveProduct}
+            className="bg-white rounded-2xl max-w-2xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto"
+          >
+            <div className="flex items-center justify-between border-b pb-3">
+              <h2 className="font-bold text-lg">
+                {form.id ? "Editar Producto" : "Nuevo Producto"}
+              </h2>
+              <button type="button" onClick={() => setShowModal(false)}>
+                <X className="w-5 h-5 text-slate-500" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold mb-1">
+                  Categoría *
+                </label>
+                <select
+                  required
+                  value={form.category_id}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      category_id: e.target.value,
+                      subcategory_id: "",
+                    })
+                  }
+                  className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
+                >
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1">
+                  Subcategoría
+                </label>
+                <select
+                  value={form.subcategory_id}
+                  onChange={(e) =>
+                    setForm({ ...form, subcategory_id: e.target.value })
+                  }
+                  className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
+                >
+                  <option value="">-- Ninguna --</option>
+                  {filteredSubsForModal.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-semibold mb-1">
+                  Nombre *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1">
+                  Precio Venta ($) *
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  required
+                  value={form.base_price}
+                  onChange={(e) =>
+                    setForm({ ...form, base_price: e.target.value })
+                  }
+                  className="w-full px-3 py-2 border rounded-lg text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1">
+                  Precio Tachado ($)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  placeholder="Opcional"
+                  value={form.compare_at_price}
+                  onChange={(e) =>
+                    setForm({ ...form, compare_at_price: e.target.value })
+                  }
+                  className="w-full px-3 py-2 border rounded-lg text-sm"
+                />
+              </div>
+            </div>
+
             <div>
-              <label className="block font-semibold mb-1">Categoría *</label>
-              <select
-                required
-                value={form.category_id}
+              <label className="block text-xs font-semibold mb-1">
+                Descripción
+              </label>
+              <textarea
+                rows="2"
+                value={form.description}
                 onChange={(e) =>
-                  setForm({
-                    ...form,
-                    category_id: e.target.value,
-                    subcategory_id: "",
-                  })
+                  setForm({ ...form, description: e.target.value })
                 }
-                className="w-full px-3 py-2 border rounded-lg"
-              >
-                {categories.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
+                className="w-full px-3 py-2 border rounded-lg text-sm"
+              />
+            </div>
+
+            {/* Fotos */}
+            <div>
+              <label className="block text-xs font-semibold mb-1">
+                Imágenes
+              </label>
+              <div className="flex flex-wrap items-center gap-3">
+                {form.images.map((img, idx) => (
+                  <div key={idx} className="relative">
+                    <img
+                      src={img.image_url}
+                      alt="Prod"
+                      className="w-16 h-16 rounded-lg object-cover border"
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setForm((prev) => ({
+                          ...prev,
+                          images: prev.images.filter((_, i) => i !== idx),
+                        }))
+                      }
+                      className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-600 text-white text-xs flex items-center justify-center"
+                    >
+                      &times;
+                    </button>
+                  </div>
                 ))}
-              </select>
+                <label className="cursor-pointer px-3 py-2 border border-dashed rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 hover:bg-slate-50">
+                  <Upload className="w-4 h-4" />
+                  {uploadingImg ? "Subiendo..." : "Subir Foto"}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleProductImageUpload}
+                  />
+                </label>
+              </div>
             </div>
 
-            <div>
-              <label className="block font-semibold mb-1">
-                Subcategoría (opcional)
-              </label>
-              <select
-                value={form.subcategory_id}
-                onChange={(e) =>
-                  setForm({ ...form, subcategory_id: e.target.value })
-                }
-                className="w-full px-3 py-2 border rounded-lg"
-              >
-                <option value="">Sin subcategoría</option>
-                {subcategories.map((sub) => (
-                  <option key={sub.id} value={sub.id}>
-                    {sub.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
+            {/* Variantes Polimórficas */}
+            <div className="border-t pt-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase text-slate-500">
+                  Variantes y Stock (Talles / Pesos / Presentaciones)
+                </span>
+                <button
+                  type="button"
+                  onClick={addVariantRow}
+                  className="text-xs font-semibold text-blue-600 hover:underline"
+                >
+                  + Agregar variante
+                </button>
+              </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block font-semibold mb-1">
-                Nombre del Producto *
-              </label>
-              <input
-                required
-                type="text"
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg"
-                placeholder="Ej: Malbec Reserva 750ml"
-              />
-            </div>
-
-            <div>
-              <label className="block font-semibold mb-1">
-                Precio Base ($) *
-              </label>
-              <input
-                required
-                type="number"
-                step="0.01"
-                value={form.base_price}
-                onChange={(e) =>
-                  setForm({ ...form, base_price: e.target.value })
-                }
-                className="w-full px-3 py-2 border rounded-lg"
-                placeholder="15000"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block font-semibold mb-1">
-                Unidad de Medida
-              </label>
-              <select
-                value={form.unit_type}
-                onChange={(e) =>
-                  setForm({ ...form, unit_type: e.target.value })
-                }
-                className="w-full px-3 py-2 border rounded-lg"
-              >
-                <option value="unidad">Unidad</option>
-                <option value="kg">Kilogramo (kg)</option>
-                <option value="100g">Cada 100g</option>
-                <option value="litro">Litro</option>
-                <option value="metro">Metro</option>
-                <option value="paquete">Paquete</option>
-              </select>
+              {form.variants.map((v, idx) => (
+                <div key={idx} className="grid grid-cols-12 gap-2 items-center">
+                  <input
+                    type="text"
+                    placeholder="Tipo (ej: Talle)"
+                    value={v.attribute_name}
+                    onChange={(e) =>
+                      updateVariant(idx, "attribute_name", e.target.value)
+                    }
+                    className="col-span-3 px-2.5 py-1.5 border rounded text-xs"
+                  />
+                  <input
+                    type="text"
+                    required
+                    placeholder="Valor (ej: XL o 500g)"
+                    value={v.attribute_value}
+                    onChange={(e) =>
+                      updateVariant(idx, "attribute_value", e.target.value)
+                    }
+                    className="col-span-4 px-2.5 py-1.5 border rounded text-xs"
+                  />
+                  <input
+                    type="number"
+                    placeholder="Precio esp."
+                    value={v.price_override}
+                    onChange={(e) =>
+                      updateVariant(idx, "price_override", e.target.value)
+                    }
+                    className="col-span-2 px-2.5 py-1.5 border rounded text-xs"
+                  />
+                  <input
+                    type="number"
+                    required
+                    min="0"
+                    placeholder="Stock"
+                    value={v.stock}
+                    onChange={(e) =>
+                      updateVariant(idx, "stock", e.target.value)
+                    }
+                    className="col-span-2 px-2.5 py-1.5 border rounded text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeVariantRow(idx)}
+                    className="col-span-1 text-slate-400 hover:text-red-600 flex justify-center"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
             </div>
 
-            <div>
-              <label className="block font-semibold mb-1">
-                Salto Mínimo de Compra
-              </label>
-              <input
-                type="number"
-                step="0.001"
-                value={form.min_step}
-                onChange={(e) => setForm({ ...form, min_step: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg"
-              />
-            </div>
-
-            <div className="flex items-end pb-2">
-              <label className="inline-flex items-center gap-2 font-semibold cursor-pointer">
+            <div className="flex items-center gap-6 pt-2">
+              <label className="flex items-center gap-2 text-xs font-semibold">
                 <input
                   type="checkbox"
                   checked={form.is_featured}
                   onChange={(e) =>
                     setForm({ ...form, is_featured: e.target.checked })
                   }
-                  className="w-4 h-4"
                 />
-                Mostrar como Destacado
+                Producto Destacado
               </label>
-            </div>
-          </div>
-
-          <div>
-            <label className="block font-semibold mb-1">
-              Descripción (opcional)
-            </label>
-            <textarea
-              rows={2}
-              value={form.description}
-              onChange={(e) =>
-                setForm({ ...form, description: e.target.value })
-              }
-              className="w-full px-3 py-2 border rounded-lg"
-            />
-          </div>
-
-          {/* Subida de Imágenes a Cloudinary */}
-          <div className="border-t pt-4">
-            <label className="block font-semibold mb-2">
-              Imágenes del Producto
-            </label>
-            <div className="flex flex-wrap items-center gap-3">
-              <label className="inline-flex items-center gap-2 px-4 py-2 border border-dashed rounded-lg cursor-pointer hover:bg-slate-50">
-                <Upload className="w-4 h-4" />
-                <span>
-                  {uploading ? "Subiendo a Cloudinary..." : "Subir Fotos"}
-                </span>
+              <label className="flex items-center gap-2 text-xs font-semibold">
                 <input
-                  type="file"
-                  multiple
-                  accept="image/*"
-                  onChange={handleImageUpload}
-                  disabled={uploading}
-                  className="hidden"
+                  type="checkbox"
+                  checked={form.is_active}
+                  onChange={(e) =>
+                    setForm({ ...form, is_active: e.target.checked })
+                  }
                 />
+                Visible en Tienda
               </label>
-
-              {form.images.map((img, idx) => (
-                <div key={idx} className="relative group">
-                  <img
-                    src={img.image_url}
-                    alt="Preview"
-                    className="w-14 h-14 object-cover rounded border"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => removeImage(idx)}
-                    className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-600 text-white text-xs flex items-center justify-center cursor-pointer"
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
             </div>
-          </div>
 
-          {/* Variantes Dinámicas */}
-          <div className="border-t pt-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="font-bold text-slate-800">
-                Variantes / Presentaciones y Stock
-              </span>
+            <div className="flex justify-end gap-2 pt-3 border-t">
               <button
                 type="button"
-                onClick={addVariantRow}
-                className="text-xs font-semibold text-blue-600 hover:underline cursor-pointer"
+                onClick={() => setShowModal(false)}
+                className="px-4 py-2 border rounded-lg text-xs font-semibold"
               >
-                + Agregar otra variante (talle, color, peso)
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={saving}
+                className="px-5 py-2 bg-slate-900 text-white rounded-lg text-xs font-bold disabled:opacity-50"
+              >
+                {saving ? "Guardando..." : "Guardar Producto"}
               </button>
             </div>
-
-            {form.variants.map((variant, idx) => (
-              <div
-                key={idx}
-                className="grid grid-cols-2 sm:grid-cols-5 gap-2 items-center bg-slate-50 p-2.5 rounded-lg"
-              >
-                <input
-                  type="text"
-                  placeholder="Atributo (ej: Talle)"
-                  value={variant.attribute_name}
-                  onChange={(e) =>
-                    updateVariantRow(idx, "attribute_name", e.target.value)
-                  }
-                  className="px-2.5 py-1.5 border rounded bg-white text-xs"
-                />
-                <input
-                  type="text"
-                  placeholder="Valor (ej: XL)"
-                  value={variant.attribute_value}
-                  onChange={(e) =>
-                    updateVariantRow(idx, "attribute_value", e.target.value)
-                  }
-                  className="px-2.5 py-1.5 border rounded bg-white text-xs"
-                />
-                <input
-                  type="number"
-                  step="0.001"
-                  placeholder="Stock"
-                  value={variant.stock}
-                  onChange={(e) =>
-                    updateVariantRow(idx, "stock", e.target.value)
-                  }
-                  className="px-2.5 py-1.5 border rounded bg-white text-xs"
-                />
-                <input
-                  type="number"
-                  placeholder="Precio especial (opc.)"
-                  value={variant.price_override || ""}
-                  onChange={(e) =>
-                    updateVariantRow(idx, "price_override", e.target.value)
-                  }
-                  className="px-2.5 py-1.5 border rounded bg-white text-xs"
-                />
-                <button
-                  type="button"
-                  onClick={() => removeVariantRow(idx)}
-                  className="text-red-500 text-xs flex items-center justify-center cursor-pointer"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            ))}
-          </div>
-
-          <div className="flex justify-end gap-3 pt-2">
-            <button
-              type="button"
-              onClick={handleCloseForm}
-              className="px-4 py-2 border rounded-lg font-semibold cursor-pointer"
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              disabled={submitting || uploading}
-              className="px-6 py-2 bg-slate-900 text-white rounded-lg font-semibold cursor-pointer disabled:opacity-50"
-            >
-              {submitting
-                ? "Guardando..."
-                : editingId
-                  ? "Actualizar Producto"
-                  : "Guardar Producto"}
-            </button>
-          </div>
-        </form>
+          </form>
+        </div>
       )}
-
-      {/* Listado de Productos */}
-      <div className="bg-white border rounded-xl overflow-hidden">
-        {loading ? (
-          <p className="p-6 text-sm text-slate-500">Cargando catálogo...</p>
-        ) : products.length === 0 ? (
-          <p className="p-6 text-sm text-slate-500">
-            Todavía no hay productos cargados.
-          </p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-slate-50 border-b text-xs uppercase text-slate-500">
-                <tr>
-                  <th className="p-3.5">Producto</th>
-                  <th className="p-3.5">Precio</th>
-                  <th className="p-3.5">Stock por Variante</th>
-                  <th className="p-3.5 text-right">Acciones</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {products.map((p) => (
-                  <tr
-                    key={p.id}
-                    className={p.is_active ? "" : "opacity-50 bg-slate-50"}
-                  >
-                    <td className="p-3.5">
-                      <div className="flex items-center gap-3">
-                        {p.images?.[0] ? (
-                          <img
-                            src={p.images[0].image_url}
-                            alt={p.name}
-                            className="w-11 h-11 rounded object-cover border"
-                          />
-                        ) : (
-                          <div className="w-11 h-11 rounded bg-slate-100 border" />
-                        )}
-                        <div>
-                          <p className="font-bold text-slate-900">{p.name}</p>
-                          <p className="text-xs text-slate-500">
-                            {p.category_name}
-                            {p.subcategory_name
-                              ? ` › ${p.subcategory_name}`
-                              : ""}
-                          </p>
-                        </div>
-                      </div>
-                    </td>
-
-                    <td className="p-3.5 font-semibold">
-                      ${Number(p.base_price).toLocaleString("es-AR")}
-                    </td>
-
-                    <td className="p-3.5">
-                      <div className="space-y-1.5">
-                        {p.variants
-                          ?.filter((v) => v.is_active === 1)
-                          .map((v) => {
-                            const lowStock =
-                              Number(v.stock) <= Number(v.min_stock_alert);
-                            return (
-                              <div
-                                key={v.id}
-                                className="flex items-center gap-2 text-xs"
-                              >
-                                <span className="font-medium text-slate-700 min-w-24">
-                                  {v.attribute_value}:
-                                </span>
-                                <input
-                                  type="number"
-                                  step="0.001"
-                                  defaultValue={v.stock}
-                                  onBlur={(e) =>
-                                    handleQuickStock(v.id, e.target.value)
-                                  }
-                                  className={`w-20 px-2 py-1 border rounded font-bold ${
-                                    lowStock
-                                      ? "border-amber-400 bg-amber-50 text-amber-800"
-                                      : ""
-                                  }`}
-                                />
-                                {lowStock && (
-                                  <span
-                                    title="Stock bajo"
-                                    className="text-amber-600 inline-flex items-center"
-                                  >
-                                    <AlertTriangle className="w-4 h-4" />
-                                  </span>
-                                )}
-                              </div>
-                            );
-                          })}
-                      </div>
-                    </td>
-
-                    <td className="p-3.5 text-right">
-                      <div className="inline-flex items-center gap-2">
-                        <button
-                          onClick={() => startEditing(p)}
-                          title="Editar producto"
-                          className="p-2 rounded border text-slate-600 hover:bg-slate-100 cursor-pointer"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() =>
-                            handleToggleFlag(
-                              p.id,
-                              "is_featured",
-                              p.is_featured === 1,
-                            )
-                          }
-                          title="Destacar"
-                          className={`p-2 rounded border cursor-pointer ${
-                            p.is_featured === 1
-                              ? "bg-amber-50 border-amber-300 text-amber-600"
-                              : "text-slate-400"
-                          }`}
-                        >
-                          <Star className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() =>
-                            handleToggleFlag(
-                              p.id,
-                              "is_active",
-                              p.is_active === 1,
-                            )
-                          }
-                          title={
-                            p.is_active === 1
-                              ? "Ocultar de tienda"
-                              : "Publicar en tienda"
-                          }
-                          className="p-2 rounded border text-slate-600 hover:bg-slate-100 cursor-pointer"
-                        >
-                          {p.is_active === 1 ? (
-                            <Eye className="w-4 h-4" />
-                          ) : (
-                            <EyeOff className="w-4 h-4" />
-                          )}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
     </div>
   );
 }
