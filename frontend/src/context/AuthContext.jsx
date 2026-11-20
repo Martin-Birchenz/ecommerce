@@ -4,9 +4,12 @@ import api from "../config/api.js";
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
+  const [token, setToken] = useState(
+    () => localStorage.getItem("token") || null,
+  );
   const [user, setUser] = useState(() => {
     try {
-      const saved = localStorage.getItem("saas_admin_user");
+      const saved = localStorage.getItem("user");
       return saved ? JSON.parse(saved) : null;
     } catch {
       return null;
@@ -15,23 +18,31 @@ export function AuthProvider({ children }) {
 
   const login = async (email, password) => {
     const res = await api.post("/auth/login", { email, password });
-    const { token, user: userData } = res.data.data;
+    const { token: jwtToken, user: userData } = res.data.data;
 
-    localStorage.setItem("saas_admin_token", token);
-    localStorage.setItem("saas_admin_user", JSON.stringify(userData));
+    localStorage.setItem("token", jwtToken);
+    localStorage.setItem("user", JSON.stringify(userData));
+    setToken(jwtToken);
     setUser(userData);
     return userData;
   };
 
   const logout = () => {
-    localStorage.removeItem("saas_admin_token");
-    localStorage.removeItem("saas_admin_user");
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+    setToken(null);
     setUser(null);
   };
 
   return (
     <AuthContext.Provider
-      value={{ user, login, logout, isAuthenticated: !!user }}
+      value={{
+        user,
+        token,
+        login,
+        logout,
+        isAuthenticated: Boolean(token && user),
+      }}
     >
       {children}
     </AuthContext.Provider>

@@ -9,7 +9,7 @@ const api = axios.create({
 
 // Adjunta el token JWT automáticamente si existe sesión administrativa
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("saas_admin_token");
+  const token = localStorage.getItem("token");
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
