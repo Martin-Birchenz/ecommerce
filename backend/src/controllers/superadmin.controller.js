@@ -111,11 +111,17 @@ const SuperAdminController = {
   async impersonateStore(req, res, next) {
     try {
       const storeId = Number(req.params.id);
-      const store = await superAdminService.getStoreById(storeId);
+      const [rows] = await pool.query(
+        "SELECT id, name, slug FROM stores WHERE id = ? LIMIT 1",
+        [storeId],
+      );
+      const store = rows[0];
+
       if (!store) {
-        return res
-          .status(404)
-          .json({ success: false, message: "Tienda no encontrada" });
+        return res.status(404).json({
+          success: false,
+          message: "Tienda no encontrada",
+        });
       }
 
       const payload = {
