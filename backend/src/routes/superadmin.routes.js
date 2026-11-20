@@ -18,5 +18,6 @@ router.post(
 );
 
 router.patch("/stores/:id/status", SuperAdminController.toggleStoreStatus);
+router.post("/stores/:id/impersonate", SuperAdminController.impersonateStore);
 
 module.exports = router;

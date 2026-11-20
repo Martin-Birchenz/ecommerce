@@ -1,5 +1,6 @@
 const bcrypt = require("bcryptjs");
 const pool = require("../config/db.js");
+const jwt = require("jsonwebtoken");
 
 const SuperAdminController = {
   listStores: async (req, res, next) => {
@@ -107,57 +108,37 @@ const SuperAdminController = {
     }
   },
 
-  impersonateStore: async (req, res, next) => {
+  async impersonateStore(req, res, next) {
     try {
       const storeId = Number(req.params.id);
-
-      const [stores] = await pool.query(
-        "SELECT id, name, slug FROM stores WHERE id = ? LIMIT 1",
-        [storeId],
-      );
-      if (stores.length === 0) {
+      const store = await superAdminService.getStoreById(storeId);
+      if (!store) {
         return res
           .status(404)
-          .json({ success: false, message: "Comercio no encontrado" });
+          .json({ success: false, message: "Tienda no encontrada" });
       }
-      const store = stores[0];
 
-      // Buscamos el admin principal de esa tienda
-      const [admins] = await pool.query(
-        "SELECT id, name, email FROM users WHERE store_id = ? AND role = 'store_admin' LIMIT 1",
-        [storeId],
-      );
-
-      const targetUser = admins[0] || {
-        id: req.user.userId,
-        name: `Soporte (${store.name})`,
-        email: "soporte@saas.com",
+      const payload = {
+        id: req.user.id,
+        email: req.user.email,
+        role: "store_admin",
+        storeId: store.id,
+        storeSlug: store.slug,
+        storeName: store.name,
+        impersonatedBySuperAdmin: true,
       };
 
       const token = jwt.sign(
-        {
-          userId: targetUser.id,
-          storeId: store.id,
-          role: "store_admin",
-          impersonatedBy: req.user.userId,
-        },
-        process.env.JWT_SECRET,
+        payload,
+        process.env.JWT_SECRET || "default_jwt_secret_dev",
         { expiresIn: "4h" },
       );
 
-      res.status(200).json({
+      return res.status(200).json({
         success: true,
         data: {
           token,
-          user: {
-            id: targetUser.id,
-            name: targetUser.name,
-            email: targetUser.email,
-            role: "store_admin",
-            storeId: store.id,
-            storeSlug: store.slug,
-            storeName: store.name,
-          },
+          user: payload,
         },
       });
     } catch (error) {
