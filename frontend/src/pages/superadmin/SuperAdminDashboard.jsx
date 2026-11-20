@@ -27,10 +27,6 @@ export default function SuperAdminDashboard() {
     accent_color: "#10B981",
   });
 
-  if (!isAuthenticated || user?.role !== "superadmin") {
-    return <Navigate to="/admin/login" replace />;
-  }
-
   const loadStores = async () => {
     setLoading(true);
     try {
@@ -42,8 +38,14 @@ export default function SuperAdminDashboard() {
   };
 
   useEffect(() => {
-    loadStores();
-  }, []);
+    if (isAuthenticated && user?.role === "superadmin") {
+      loadStores();
+    }
+  }, [isAuthenticated, user?.role]);
+
+  if (!isAuthenticated || user?.role !== "superadmin") {
+    return <Navigate to="/admin/login" replace />;
+  }
 
   const handleNameChange = (value) => {
     const generatedSlug = value
@@ -96,9 +98,9 @@ export default function SuperAdminDashboard() {
   const handleImpersonate = async (storeId) => {
     try {
       const res = await api.post(`/superadmin/stores/${storeId}/impersonate`);
-      const { token, user } = res.data.data;
+      const { token, user: storeUser } = res.data.data;
       localStorage.setItem("token", token);
-      localStorage.setItem("user", JSON.stringify(user));
+      localStorage.setItem("user", JSON.stringify(storeUser));
       window.location.href = "/admin/dashboard";
     } catch (err) {
       alert(err.response?.data?.message || "No se pudo ingresar a la tienda");
@@ -336,22 +338,25 @@ export default function SuperAdminDashboard() {
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => handleImpersonate(store.id)}
-                  className="px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800"
-                >
-                  Administrar Tienda
-                </button>
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => handleImpersonate(s.id)}
+                    className="w-full py-2 rounded-lg bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800 cursor-pointer"
+                  >
+                    Administrar Tienda
+                  </button>
 
-                <a
-                  href={`/t/${s.slug}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="w-full py-2 border rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 hover:bg-slate-50"
-                >
-                  Abrir Tienda Pública <ExternalLink className="w-3.5 h-3.5" />
-                </a>
+                  <a
+                    href={`/t/${s.slug}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full py-2 border rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 hover:bg-slate-50"
+                  >
+                    Abrir Tienda Pública{" "}
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                </div>
               </div>
             ))
           )}
