@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Search, SlidersHorizontal } from "lucide-react";
-import { useTenant } from "../../context/TenantContext.jsx";
+import { useTenant } from "../../context/StoreContext.jsx";
 import ProductCard from "../../components/storefront/ProductCard.jsx";
 import ProductDetailModal from "../../components/storefront/ProductDetailModal.jsx";
 

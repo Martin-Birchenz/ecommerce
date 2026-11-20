@@ -13,6 +13,9 @@ import CouponsManager from "./pages/admin/CouponsManager.jsx";
 
 import SuperAdminDashboard from "./pages/superadmin/SuperAdminDashboard.jsx";
 
+import CheckoutReturn from "./pages/storefront/CheckoutReturn.jsx";
+import SuperAdminLogin from "./pages/superadmin/SuperAdminLogin.jsx";
+
 const RequireStoreAdmin = ({ children }) => {
   const token = localStorage.getItem("token");
   const user = JSON.parse(localStorage.getItem("user") || "{}");
@@ -38,6 +41,7 @@ export default function App() {
         {/* 1. Tienda Pública Multi-Tenant ("Camaleón") */}
         <Route path="/t/:slug" element={<StoreLayout />}>
           <Route index element={<StoreHome />} />
+          <Route path="checkout/:status" element={<CheckoutReturn />} />
         </Route>
 
         {/* 2. Panel de Administración del Comercio */}
@@ -57,6 +61,8 @@ export default function App() {
           <Route path="orders" element={<Orders />} />
           <Route path="coupons" element={<CouponsManager />} />
         </Route>
+
+        <Route path="/superadmin/login" element={<SuperAdminLogin />} />
 
         {/* 3. Consola Maestra del Dueño del SaaS (SuperAdmin) */}
         <Route

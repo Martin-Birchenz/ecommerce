@@ -10,7 +10,7 @@ import {
   Truck,
 } from "lucide-react";
 import { useCart } from "../../context/CartContext.jsx";
-import { useTenant } from "../../context/TenantContext.jsx";
+import { useTenant } from "../../context/StoreContext.jsx";
 import api from "../../config/api.js";
 
 export default function CartDrawer() {
