@@ -81,3 +81,4 @@ export function StoreProvider({ children }) {
 }
 
 export const useStore = () => useContext(StoreContext);
+export const useTenant = useStore;
