@@ -12,38 +12,57 @@ export function StoreProvider({ children }) {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    if (!slug) return;
+    if (!slug) {
+      setLoading(false);
+      setError("Tienda no especificada");
+      return;
+    }
 
     const loadStore = async () => {
       setLoading(true);
       setError(null);
       try {
         const res = await api.get(`/public/${slug}/bootstrap`);
-        const { store: storeData, categories: catData } = res.data.data;
+        const payload = res.data?.data || {};
+        const storeData = payload.store || payload;
+        const catData = Array.isArray(payload.categories)
+          ? payload.categories
+          : [];
 
         setStore(storeData);
         setCategories(catData);
 
         // Inyectar CSS Variables en :root (Efecto Camaleón)
         const root = document.documentElement;
-        root.style.setProperty("--color-primary", storeData.primary_color);
-        root.style.setProperty("--color-secondary", storeData.secondary_color);
-        root.style.setProperty("--color-accent", storeData.accent_color);
-        root.style.setProperty("--color-bg", storeData.background_color);
-        root.style.setProperty("--color-surface", storeData.surface_color);
-        root.style.setProperty("--color-text", storeData.text_color);
+        if (storeData.primary_color)
+          root.style.setProperty("--color-primary", storeData.primary_color);
+        if (storeData.secondary_color)
+          root.style.setProperty(
+            "--color-secondary",
+            storeData.secondary_color,
+          );
+        if (storeData.accent_color)
+          root.style.setProperty("--color-accent", storeData.accent_color);
+        if (storeData.background_color)
+          root.style.setProperty("--color-bg", storeData.background_color);
+        if (storeData.surface_color)
+          root.style.setProperty("--color-surface", storeData.surface_color);
+        if (storeData.text_color)
+          root.style.setProperty("--color-text", storeData.text_color);
         root.style.setProperty(
           "--radius-base",
           storeData.border_radius || "0.5rem",
         );
-        root.style.setProperty(
-          "--font-heading",
-          `'${storeData.font_heading}', sans-serif`,
-        );
-        root.style.setProperty(
-          "--font-body",
-          `'${storeData.font_body}', sans-serif`,
-        );
+        if (storeData.font_heading)
+          root.style.setProperty(
+            "--font-heading",
+            `'${storeData.font_heading}', sans-serif`,
+          );
+        if (storeData.font_body)
+          root.style.setProperty(
+            "--font-body",
+            `'${storeData.font_body}', sans-serif`,
+          );
 
         // Cargar fuentes dinámicamente desde Google Fonts
         const fonts = [storeData.font_heading, storeData.font_body]
@@ -62,7 +81,9 @@ export function StoreProvider({ children }) {
           link.href = `https://fonts.googleapis.com/css2?family=${fonts}&display=swap`;
         }
 
-        document.title = storeData.name;
+        if (storeData.name) {
+          document.title = storeData.name;
+        }
       } catch (err) {
         setError(err.response?.data?.message || "No se pudo cargar la tienda");
       } finally {

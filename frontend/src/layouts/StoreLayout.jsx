@@ -1,12 +1,21 @@
-import { Outlet, Link } from "react-router-dom";
+import { Outlet, Link, useParams } from "react-router-dom";
 import { ShoppingBag, Store, MessageCircle } from "lucide-react";
-import { useStore } from "../context/StoreContext.jsx";
+import { StoreProvider, useStore } from "../context/StoreContext.jsx";
 import { useCart } from "../context/CartContext.jsx";
 import CartDrawer from "../components/storefront/CartDrawer.jsx";
 
-export default function StoreLayout() {
-  const { slug, store, loading, error } = useStore();
-  const { totalCount, setIsOpen } = useCart();
+function StoreLayoutContent() {
+  const params = useParams();
+  const storeCtx = useStore();
+  const cartCtx = useCart();
+
+  const slug = storeCtx?.slug || params.slug;
+  const store = storeCtx?.store || null;
+  const loading = storeCtx?.loading ?? true;
+  const error = storeCtx?.error || null;
+
+  const totalCount = cartCtx?.totalCount || 0;
+  const setIsOpen = cartCtx?.setIsOpen || (() => {});
 
   if (loading) {
     return (
@@ -14,7 +23,7 @@ export default function StoreLayout() {
         <div
           className="w-10 h-10 border-4 border-t-transparent rounded-full animate-spin"
           style={{
-            borderColor: "var(--color-primary)",
+            borderColor: "var(--color-primary, #0f172a)",
             borderTopColor: "transparent",
           }}
         />
@@ -35,7 +44,7 @@ export default function StoreLayout() {
     );
   }
 
-  const whatsappUrl = `https://wa.me/${store.whatsapp_number}?text=${encodeURIComponent(
+  const whatsappUrl = `https://wa.me/${store.whatsapp_number || ""}?text=${encodeURIComponent(
     `Hola ${store.name}, te escribo desde la tienda online.`,
   )}`;
 
@@ -68,7 +77,7 @@ export default function StoreLayout() {
                   borderRadius: "var(--radius-base)",
                 }}
               >
-                {store.name.charAt(0).toUpperCase()}
+                {store.name?.charAt(0).toUpperCase() || "T"}
               </div>
             )}
             <span className="font-heading font-bold text-lg tracking-tight">
@@ -77,6 +86,7 @@ export default function StoreLayout() {
           </Link>
 
           <button
+            type="button"
             onClick={() => setIsOpen(true)}
             className="relative flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 cursor-pointer"
             style={{
@@ -104,16 +114,18 @@ export default function StoreLayout() {
       </main>
 
       {/* Botón Flotante de WhatsApp */}
-      <a
-        href={whatsappUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        aria-label="Consultar por WhatsApp"
-        className="fixed bottom-5 right-5 z-30 flex items-center justify-center w-14 h-14 rounded-full text-white shadow-lg transition-transform hover:scale-105"
-        style={{ backgroundColor: "#25D366" }}
-      >
-        <MessageCircle className="w-7 h-7" />
-      </a>
+      {store.whatsapp_number && (
+        <a
+          href={whatsappUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Consultar por WhatsApp"
+          className="fixed bottom-5 right-5 z-30 flex items-center justify-center w-14 h-14 rounded-full text-white shadow-lg transition-transform hover:scale-105"
+          style={{ backgroundColor: "#25D366" }}
+        >
+          <MessageCircle className="w-7 h-7" />
+        </a>
+      )}
 
       {/* Footer */}
       <footer
@@ -134,5 +146,20 @@ export default function StoreLayout() {
       {/* Drawer Lateral del Carrito + Checkout */}
       <CartDrawer />
     </div>
+  );
+}
+
+export default function StoreLayout() {
+  const existingCtx = useStore();
+
+  // Si App.jsx ya envolvió con StoreProvider, lo usa directo; si no, lo envuelve automáticamente
+  if (existingCtx) {
+    return <StoreLayoutContent />;
+  }
+
+  return (
+    <StoreProvider>
+      <StoreLayoutContent />
+    </StoreProvider>
   );
 }

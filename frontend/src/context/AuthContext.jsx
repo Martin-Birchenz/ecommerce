@@ -20,8 +20,8 @@ export function AuthProvider({ children }) {
     const res = await api.post("/auth/login", { email, password });
     const { token: jwtToken, user: userData } = res.data.data;
 
-    sessionStorage.removeItem("superadmin_backup_token");
-    sessionStorage.removeItem("superadmin_backup_user");
+    localStorage.removeItem("superadmin_backup_token");
+    localStorage.removeItem("superadmin_backup_user");
     localStorage.setItem("token", jwtToken);
     localStorage.setItem("user", JSON.stringify(userData));
     setToken(jwtToken);
@@ -29,7 +29,6 @@ export function AuthProvider({ children }) {
     return userData;
   };
 
-  // Guarda la sesión de SuperAdmin antes de entrar a gestionar una tienda
   const startImpersonation = (impersonatedToken, impersonatedUser) => {
     const currentToken = localStorage.getItem("token");
     const currentUser = localStorage.getItem("user");
@@ -37,10 +36,10 @@ export function AuthProvider({ children }) {
     if (
       currentToken &&
       currentUser &&
-      !sessionStorage.getItem("superadmin_backup_token")
+      !localStorage.getItem("superadmin_backup_token")
     ) {
-      sessionStorage.setItem("superadmin_backup_token", currentToken);
-      sessionStorage.setItem("superadmin_backup_user", currentUser);
+      localStorage.setItem("superadmin_backup_token", currentToken);
+      localStorage.setItem("superadmin_backup_user", currentUser);
     }
 
     localStorage.setItem("token", impersonatedToken);
@@ -49,13 +48,12 @@ export function AuthProvider({ children }) {
     setUser(impersonatedUser);
   };
 
-  // Restaura la sesión original de SuperAdmin al salir de la tienda
   const stopImpersonation = () => {
-    const backupToken = sessionStorage.getItem("superadmin_backup_token");
-    const backupUserStr = sessionStorage.getItem("superadmin_backup_user");
+    const backupToken = localStorage.getItem("superadmin_backup_token");
+    const backupUserStr = localStorage.getItem("superadmin_backup_user");
 
-    sessionStorage.removeItem("superadmin_backup_token");
-    sessionStorage.removeItem("superadmin_backup_user");
+    localStorage.removeItem("superadmin_backup_token");
+    localStorage.removeItem("superadmin_backup_user");
 
     if (backupToken && backupUserStr) {
       try {
@@ -66,15 +64,15 @@ export function AuthProvider({ children }) {
         setUser(backupUser);
         return true;
       } catch {
-        // Si falla el parseo, continúa al fallback
+        // fallback
       }
     }
     return false;
   };
 
   const logout = () => {
-    sessionStorage.removeItem("superadmin_backup_token");
-    sessionStorage.removeItem("superadmin_backup_user");
+    localStorage.removeItem("superadmin_backup_token");
+    localStorage.removeItem("superadmin_backup_user");
     localStorage.removeItem("token");
     localStorage.removeItem("user");
     setToken(null);
