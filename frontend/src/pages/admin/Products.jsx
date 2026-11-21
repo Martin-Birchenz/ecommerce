@@ -50,12 +50,37 @@ export default function Products() {
         api.get("/admin/products"),
         api.get("/admin/categories"),
       ]);
-      setProducts(prodRes.data.data);
-      setCategories(catRes.data.data.categories);
-      setSubcategories(catRes.data.data.subcategories);
-      if (catRes.data.data.categories.length > 0 && !newSubCatId) {
-        setNewSubCatId(catRes.data.data.categories[0].id);
+
+      const rawProds = prodRes.data?.data;
+      const prodList = Array.isArray(rawProds)
+        ? rawProds
+        : Array.isArray(rawProds?.products)
+          ? rawProds.products
+          : [];
+
+      const rawCats = catRes.data?.data;
+      const catList = Array.isArray(rawCats)
+        ? rawCats
+        : Array.isArray(rawCats?.categories)
+          ? rawCats.categories
+          : [];
+
+      const subList = Array.isArray(rawCats?.subcategories)
+        ? rawCats.subcategories
+        : [];
+
+      setProducts(prodList);
+      setCategories(catList);
+      setSubcategories(subList);
+
+      if (catList.length > 0 && !newSubCatId) {
+        setNewSubCatId(catList[0].id);
       }
+    } catch (err) {
+      console.error("Error cargando productos/categorías:", err);
+      setProducts([]);
+      setCategories([]);
+      setSubcategories([]);
     } finally {
       setLoading(false);
     }
@@ -134,9 +159,9 @@ export default function Products() {
       unit_label: prod.unit_label || "Unidad",
       is_featured: Boolean(prod.is_featured),
       is_active: Boolean(prod.is_active),
-      images: prod.images || [],
+      images: Array.isArray(prod.images) ? prod.images : [],
       variants:
-        prod.variants && prod.variants.length > 0
+        Array.isArray(prod.variants) && prod.variants.length > 0
           ? prod.variants.map((v) => ({
               ...v,
               price_override: v.price_override ?? "",
@@ -260,7 +285,11 @@ export default function Products() {
     }
   };
 
-  const filteredSubsForModal = subcategories.filter(
+  const safeCategories = Array.isArray(categories) ? categories : [];
+  const safeSubcategories = Array.isArray(subcategories) ? subcategories : [];
+  const safeProducts = Array.isArray(products) ? products : [];
+
+  const filteredSubsForModal = safeSubcategories.filter(
     (s) => String(s.category_id) === String(form.category_id),
   );
 
@@ -279,7 +308,7 @@ export default function Products() {
         <button
           type="button"
           onClick={openNewProduct}
-          disabled={categories.length === 0}
+          disabled={safeCategories.length === 0}
           className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 disabled:opacity-40"
         >
           <Plus className="w-4 h-4" /> Nuevo Producto
@@ -311,7 +340,7 @@ export default function Products() {
               onChange={(e) => setNewSubCatId(e.target.value)}
               className="px-3 py-2 border rounded-lg text-sm bg-white"
             >
-              {categories.map((c) => (
+              {safeCategories.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
                 </option>
@@ -326,7 +355,7 @@ export default function Products() {
             />
             <button
               type="submit"
-              disabled={categories.length === 0}
+              disabled={safeCategories.length === 0}
               className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-bold disabled:opacity-40"
             >
               + Sub
@@ -335,10 +364,10 @@ export default function Products() {
         </div>
 
         {/* Chips de Categorías y Subcategorías con borrado */}
-        {categories.length > 0 && (
+        {safeCategories.length > 0 && (
           <div className="flex flex-wrap gap-2 pt-2 border-t">
-            {categories.map((cat) => {
-              const childSubs = subcategories.filter(
+            {safeCategories.map((cat) => {
+              const childSubs = safeSubcategories.filter(
                 (s) => String(s.category_id) === String(cat.id),
               );
               return (
@@ -401,9 +430,10 @@ export default function Products() {
               </tr>
             </thead>
             <tbody className="divide-y">
-              {products.map((p) => {
-                const totalStock = p.variants.reduce(
-                  (acc, v) => acc + Number(v.stock),
+              {safeProducts.map((p) => {
+                const variants = Array.isArray(p.variants) ? p.variants : [];
+                const totalStock = variants.reduce(
+                  (acc, v) => acc + Number(v.stock || 0),
                   0,
                 );
                 return (
@@ -440,7 +470,7 @@ export default function Products() {
                     </td>
                     <td className="px-4 py-3 text-xs">
                       <div className="flex flex-wrap gap-1">
-                        {p.variants.map((v) => (
+                        {variants.map((v) => (
                           <span
                             key={v.id}
                             className={`px-2 py-0.5 rounded border ${
@@ -480,6 +510,16 @@ export default function Products() {
                   </tr>
                 );
               })}
+              {safeProducts.length === 0 && (
+                <tr>
+                  <td
+                    colSpan="6"
+                    className="px-4 py-8 text-center text-slate-500"
+                  >
+                    Todavía no cargaste productos en este comercio.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -518,7 +558,7 @@ export default function Products() {
                   }
                   className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
                 >
-                  {categories.map((c) => (
+                  {safeCategories.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
                     </option>

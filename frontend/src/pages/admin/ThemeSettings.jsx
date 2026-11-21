@@ -11,28 +11,42 @@ export default function ThemeSettings() {
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    api.get("/admin/settings").then((res) => {
-      const s = res.data.data.settings;
-      setForm({
-        ...s,
-        mp_enabled: Boolean(s.mp_enabled),
-        mp_access_token: s.mp_access_token || "",
-        transfer_enabled: Boolean(s.transfer_enabled),
-        cash_pickup_enabled: Boolean(s.cash_pickup_enabled),
-        delivery_enabled: Boolean(s.delivery_enabled),
-        pickup_enabled: Boolean(s.pickup_enabled),
-        free_shipping_min: s.free_shipping_min ?? "",
-      });
+    api
+      .get("/admin/settings")
+      .then((res) => {
+        const payload = res.data?.data || {};
+        const s = payload.settings || payload;
 
-      const parsedZones =
-        typeof s.shipping_zones === "string"
-          ? JSON.parse(s.shipping_zones || "[]")
-          : Array.isArray(s.shipping_zones)
-            ? s.shipping_zones
-            : [];
-      setZones(parsedZones);
-      setLoading(false);
-    });
+        setForm({
+          ...s,
+          mp_enabled: Boolean(s.mp_enabled),
+          mp_access_token: s.mp_access_token || "",
+          transfer_enabled: Boolean(s.transfer_enabled),
+          cash_pickup_enabled: Boolean(s.cash_pickup_enabled),
+          delivery_enabled: Boolean(s.delivery_enabled),
+          pickup_enabled: Boolean(s.pickup_enabled),
+          free_shipping_min: s.free_shipping_min ?? "",
+        });
+
+        let parsedZones = [];
+        try {
+          parsedZones =
+            typeof s.shipping_zones === "string"
+              ? JSON.parse(s.shipping_zones || "[]")
+              : Array.isArray(s.shipping_zones)
+                ? s.shipping_zones
+                : [];
+        } catch {
+          parsedZones = [];
+        }
+        setZones(parsedZones);
+      })
+      .catch((err) => {
+        console.error("Error cargando settings:", err);
+      })
+      .finally(() => {
+        setLoading(false);
+      });
   }, []);
 
   const handleImageUpload = async (e, fieldName) => {
@@ -88,8 +102,14 @@ export default function ThemeSettings() {
     }
   };
 
-  if (loading || !form)
+  if (loading)
     return <p className="text-sm text-slate-500">Cargando diseño...</p>;
+  if (!form)
+    return (
+      <p className="text-sm text-red-600">
+        No se pudo cargar la configuración de la tienda.
+      </p>
+    );
 
   return (
     <form onSubmit={handleSave} className="max-w-4xl space-y-6">
