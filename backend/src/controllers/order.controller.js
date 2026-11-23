@@ -16,6 +16,26 @@ const OrderController = {
     }
   },
 
+  // Público: generar preferencia de Mercado Pago Checkout Pro
+  createMercadoPagoPreference: async (req, res, next) => {
+    try {
+      const orderId = Number(req.body.order_id);
+      if (!orderId) {
+        return res
+          .status(400)
+          .json({ success: false, message: "order_id requerido" });
+      }
+      const data = await OrderService.createMercadoPagoPreference(
+        req.storeId,
+        req.params.slug,
+        orderId,
+      );
+      res.status(200).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  },
+
   // Webhook público de Mercado Pago por tienda
   mercadoPagoWebhook: async (req, res) => {
     try {
@@ -72,7 +92,7 @@ const OrderController = {
       await connection.beginTransaction();
 
       const [orders] = await connection.query(
-        "SELECT id, status, payment_method FROM orders WHERE id = ? AND store_id = ? FOR UPDATE",
+        "SELECT id, status FROM orders WHERE id = ? AND store_id = ? FOR UPDATE",
         [orderId, req.storeId],
       );
 
@@ -85,19 +105,11 @@ const OrderController = {
 
       const currentOrder = orders[0];
 
-      // Si pasa a 'cancelled' desde un estado que ya había descontado stock, lo reponemos
-      const stockWasDeducted =
-        currentOrder.payment_method !== "mercadopago" ||
-        currentOrder.status === "paid";
-
-      if (
-        status === "cancelled" &&
-        currentOrder.status !== "cancelled" &&
-        stockWasDeducted
-      ) {
+      // Como el stock siempre se reserva al crear la orden, si pasa a 'cancelled' se repone una sola vez
+      if (status === "cancelled" && currentOrder.status !== "cancelled") {
         const [items] = await connection.query(
-          "SELECT variant_id, quantity FROM order_items WHERE order_id = ?",
-          [orderId],
+          "SELECT variant_id, quantity FROM order_items WHERE order_id = ? AND store_id = ?",
+          [orderId, req.storeId],
         );
         for (const item of items) {
           await connection.query(

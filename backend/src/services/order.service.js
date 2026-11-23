@@ -1,11 +1,6 @@
 const pool = require("../config/db.js");
 const { MercadoPagoConfig, Preference, Payment } = require("mercadopago");
 
-const generateOrderNumber = () => {
-  const randomPart = Math.floor(100000 + Math.random() * 900000);
-  return `ORD-${randomPart}`;
-};
-
 const OrderService = {
   createOrder: async (storeId, payload) => {
     const connection = await pool.getConnection();
@@ -118,6 +113,7 @@ const OrderService = {
           subtotal: lineSubtotal,
         });
 
+        // Reserva inmediata de stock bajo bloqueo FOR UPDATE
         await connection.query(
           "UPDATE product_variants SET stock = stock - ? WHERE id = ? AND store_id = ?",
           [requestedQty, variantId, storeId],
@@ -297,83 +293,69 @@ const OrderService = {
     }
   },
 
-  listOrdersByStore: async (storeId, { status } = {}) => {
-    let sql = `
-      SELECT *
-      FROM orders
-      WHERE store_id = ?
-    `;
-    const params = [storeId];
-
-    if (status && status !== "all") {
-      sql += " AND status = ?";
-      params.push(status);
-    }
-
-    sql += " ORDER BY created_at DESC";
-    const [orders] = await pool.query(sql, params);
-    if (orders.length === 0) return [];
-
-    const orderIds = orders.map((o) => o.id);
-    const placeholders = orderIds.map(() => "?").join(",");
-    const [items] = await pool.query(
-      `SELECT * FROM order_items WHERE store_id = ? AND order_id IN (${placeholders})`,
-      [storeId, ...orderIds],
+  createMercadoPagoPreference: async (storeId, slug, orderId) => {
+    const [orders] = await pool.query(
+      "SELECT * FROM orders WHERE id = ? AND store_id = ? LIMIT 1",
+      [orderId, storeId],
     );
-
-    return orders.map((o) => ({
-      ...o,
-      items: items.filter((i) => i.order_id === o.id),
-    }));
-  },
-
-  updateOrderStatus: async (storeId, orderId, newStatus) => {
-    const connection = await pool.getConnection();
-    try {
-      await connection.beginTransaction();
-
-      const [orders] = await connection.query(
-        "SELECT id, status FROM orders WHERE id = ? AND store_id = ? FOR UPDATE",
-        [orderId, storeId],
-      );
-      if (orders.length === 0) {
-        const err = new Error("Pedido no encontrado");
-        err.statusCode = 404;
-        throw err;
-      }
-
-      const currentStatus = orders[0].status;
-      if (currentStatus === newStatus) {
-        await connection.commit();
-        return { id: orderId, status: newStatus };
-      }
-
-      if (newStatus === "cancelled" && currentStatus !== "cancelled") {
-        const [items] = await connection.query(
-          "SELECT variant_id, quantity FROM order_items WHERE order_id = ? AND store_id = ?",
-          [orderId, storeId],
-        );
-        for (const item of items) {
-          await connection.query(
-            "UPDATE product_variants SET stock = stock + ? WHERE id = ? AND store_id = ?",
-            [item.quantity, item.variant_id, storeId],
-          );
-        }
-      }
-
-      await connection.query(
-        "UPDATE orders SET status = ? WHERE id = ? AND store_id = ?",
-        [newStatus, orderId, storeId],
-      );
-
-      await connection.commit();
-      return { id: orderId, status: newStatus };
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    } finally {
-      connection.release();
+    if (orders.length === 0) {
+      const err = new Error("Pedido no encontrado");
+      err.statusCode = 404;
+      throw err;
     }
+    const order = orders[0];
+
+    const [settingsRows] = await pool.query(
+      "SELECT mp_enabled, mp_access_token FROM store_settings WHERE store_id = ? LIMIT 1",
+      [storeId],
+    );
+    const settings = settingsRows[0];
+    if (!settings?.mp_enabled || !settings?.mp_access_token) {
+      const err = new Error(
+        "El comercio no tiene configurado el token de Mercado Pago",
+      );
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const client = new MercadoPagoConfig({
+      accessToken: settings.mp_access_token,
+    });
+    const preference = new Preference(client);
+
+    const frontendBase = (
+      process.env.FRONTEND_URL || "http://localhost:5173"
+    ).replace(/\/$/, "");
+    const backendBase = (
+      process.env.BACKEND_URL || "https://ecommerce-z6at.onrender.com"
+    ).replace(/\/$/, "");
+
+    const response = await preference.create({
+      body: {
+        items: [
+          {
+            id: String(order.order_number),
+            title: `Pedido #${order.order_number}`,
+            quantity: 1,
+            currency_id: "ARS",
+            unit_price: Number(order.total_amount),
+          },
+        ],
+        external_reference: `${storeId}:${order.id}`,
+        notification_url: `${backendBase}/api/webhooks/mercadopago/${storeId}`,
+        back_urls: {
+          success: `${frontendBase}/t/${slug}/checkout/success?order=${order.order_number}`,
+          failure: `${frontendBase}/t/${slug}/checkout/failure?order=${order.order_number}`,
+          pending: `${frontendBase}/t/${slug}/checkout/pending?order=${order.order_number}`,
+        },
+        auto_return: "approved",
+      },
+    });
+
+    return {
+      preference_id: response.id,
+      init_point: response.init_point,
+    };
   },
 
   processMercadoPagoWebhook: async (storeId, paymentId) => {
@@ -391,11 +373,11 @@ const OrderService = {
       const paymentApi = new Payment(client);
       const paymentInfo = await paymentApi.get({ id: paymentId });
 
-      if (paymentInfo.status !== "approved" || !paymentInfo.external_reference)
-        return;
+      if (!paymentInfo?.external_reference) return;
 
-      const [, orderIdStr] = paymentInfo.external_reference.split(":");
+      const [, orderIdStr] = String(paymentInfo.external_reference).split(":");
       const orderId = Number(orderIdStr);
+      if (!orderId) return;
 
       await connection.beginTransaction();
 
@@ -405,27 +387,42 @@ const OrderService = {
         [orderId, storeId],
       );
 
-      if (orders.length === 0 || orders[0].status === "paid") {
+      if (orders.length === 0) {
         await connection.commit();
         return;
       }
 
-      const [items] = await connection.query(
-        "SELECT variant_id, quantity FROM order_items WHERE order_id = ?",
-        [orderId],
-      );
+      const currentStatus = orders[0].status;
 
-      for (const item of items) {
+      if (paymentInfo.status === "approved") {
+        if (currentStatus !== "paid") {
+          // El stock ya fue reservado al crear la orden en createOrder
+          await connection.query(
+            "UPDATE orders SET status = 'paid', mp_payment_id = ? WHERE id = ? AND store_id = ?",
+            [String(paymentId), orderId, storeId],
+          );
+        }
+      } else if (
+        (paymentInfo.status === "rejected" ||
+          paymentInfo.status === "cancelled") &&
+        currentStatus === "pending"
+      ) {
+        // Devolver stock reservado si el pago fue rechazado o cancelado
+        const [items] = await connection.query(
+          "SELECT variant_id, quantity FROM order_items WHERE order_id = ? AND store_id = ?",
+          [orderId, storeId],
+        );
+        for (const item of items) {
+          await connection.query(
+            "UPDATE product_variants SET stock = stock + ? WHERE id = ? AND store_id = ?",
+            [item.quantity, item.variant_id, storeId],
+          );
+        }
         await connection.query(
-          "UPDATE product_variants SET stock = GREATEST(0, stock - ?) WHERE id = ? AND store_id = ?",
-          [item.quantity, item.variant_id, storeId],
+          "UPDATE orders SET status = 'cancelled', mp_payment_id = ? WHERE id = ? AND store_id = ?",
+          [String(paymentId), orderId, storeId],
         );
       }
-
-      await connection.query(
-        "UPDATE orders SET status = 'paid', mp_payment_id = ? WHERE id = ?",
-        [String(paymentId), orderId],
-      );
 
       await connection.commit();
     } catch (error) {

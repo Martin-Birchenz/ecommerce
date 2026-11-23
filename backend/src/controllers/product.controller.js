@@ -1,3 +1,4 @@
+const pool = require("../config/db.js");
 const ProductRepository = require("../repositories/product.repository.js");
 
 const ProductController = {
@@ -19,7 +20,6 @@ const ProductController = {
   },
 
   // 2. Admin: lista todos los productos de la tienda (activos y ocultos)
-
   getAdminProducts: async (req, res, next) => {
     try {
       const products = await ProductRepository.findAllByStore(req.storeId, {
@@ -84,24 +84,59 @@ const ProductController = {
     }
   },
 
-  // 6. Admin: actualización rápida de stock por variante
+  // 6. Admin: actualización atómica de stock (soporta { stock } absoluto o { delta } para mostrador físico)
   updateStock: async (req, res, next) => {
+    const connection = await pool.getConnection();
     try {
-      const { variantId } = req.params;
-      const { stock } = req.body;
-      const updated = await ProductRepository.updateVariantStock(
-        req.storeId,
-        Number(variantId),
-        Number(stock),
+      const variantId = Number(req.params.variantId);
+      const { stock, delta } = req.body;
+
+      await connection.beginTransaction();
+
+      const [rows] = await connection.query(
+        "SELECT id, stock FROM product_variants WHERE id = ? AND store_id = ? FOR UPDATE",
+        [variantId, req.storeId],
       );
-      if (!updated) {
+
+      if (rows.length === 0) {
+        await connection.rollback();
         return res
           .status(404)
           .json({ success: false, message: "Variante no encontrada" });
       }
-      res.status(200).json({ success: true, message: "Stock actualizado" });
+
+      const currentStock = Number(rows[0].stock);
+      let newStock = currentStock;
+
+      if (delta !== undefined && delta !== null) {
+        newStock = currentStock + Number(delta);
+        if (newStock < 0) {
+          await connection.rollback();
+          return res.status(409).json({
+            success: false,
+            message: `Stock insuficiente en mostrador (disponible: ${currentStock})`,
+          });
+        }
+      } else if (stock !== undefined && stock !== null) {
+        newStock = Math.max(0, Number(stock));
+      }
+
+      await connection.query(
+        "UPDATE product_variants SET stock = ? WHERE id = ? AND store_id = ?",
+        [newStock, variantId, req.storeId],
+      );
+
+      await connection.commit();
+      res.status(200).json({
+        success: true,
+        message: "Stock actualizado",
+        data: { variant_id: variantId, stock: newStock },
+      });
     } catch (error) {
+      await connection.rollback();
       next(error);
+    } finally {
+      connection.release();
     }
   },
 

@@ -18,6 +18,10 @@ router.post(
   validate(createOrderSchema),
   OrderController.createPublicOrder,
 );
+router.post(
+  "/payments/mercadopago/preference",
+  OrderController.createMercadoPagoPreference,
+);
 router.post("/coupons/validate", CouponController.validatePublicCoupon);
 
 module.exports = router;
