@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext.jsx";
+import { CartProvider } from "./context/CartContext.jsx";
 
 import StoreLayout from "./layouts/StoreLayout.jsx";
 import AdminLayout from "./layouts/AdminLayout.jsx";
@@ -16,12 +17,21 @@ import CouponsManager from "./pages/admin/CouponsManager.jsx";
 
 import SuperAdminDashboard from "./pages/superadmin/SuperAdminDashboard.jsx";
 
+function getStoredUser() {
+  try {
+    return JSON.parse(localStorage.getItem("user") || "{}");
+  } catch {
+    return {};
+  }
+}
+
 function RequireStoreAdmin({ children }) {
   const auth = useAuth();
-  const token = auth?.token || localStorage.getItem("token");
-  const user = auth?.user || JSON.parse(localStorage.getItem("user") || "{}");
+  const storedUser = getStoredUser();
+  const token = localStorage.getItem("token") || auth?.token;
+  const role = storedUser?.role || auth?.user?.role;
 
-  if (!token || user?.role !== "store_admin") {
+  if (!token || (role !== "store_admin" && role !== "superadmin")) {
     return <Navigate to="/admin/login" replace />;
   }
   return children;
@@ -29,10 +39,11 @@ function RequireStoreAdmin({ children }) {
 
 function RequireSuperAdmin({ children }) {
   const auth = useAuth();
-  const token = auth?.token || localStorage.getItem("token");
-  const user = auth?.user || JSON.parse(localStorage.getItem("user") || "{}");
+  const storedUser = getStoredUser();
+  const token = localStorage.getItem("token") || auth?.token;
+  const role = storedUser?.role || auth?.user?.role;
 
-  if (!token || user?.role !== "superadmin") {
+  if (!token || role !== "superadmin") {
     return <Navigate to="/admin/login" replace />;
   }
   return children;
@@ -44,7 +55,14 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           {/* 1. Tienda Pública Multi-Tenant ("Camaleón") */}
-          <Route path="/t/:slug" element={<StoreLayout />}>
+          <Route
+            path="/t/:slug"
+            element={
+              <CartProvider>
+                <StoreLayout />
+              </CartProvider>
+            }
+          >
             <Route index element={<StoreHome />} />
             <Route path="checkout/:status" element={<CheckoutReturn />} />
           </Route>
