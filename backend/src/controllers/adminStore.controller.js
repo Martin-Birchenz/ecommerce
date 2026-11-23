@@ -1,4 +1,5 @@
 const pool = require("../config/db.js");
+const ShippingService = require("../services/shipping.service.js");
 
 const slugify = (text) =>
   text
@@ -12,6 +13,7 @@ const slugify = (text) =>
 const AdminStoreController = {
   getSettings: async (req, res, next) => {
     try {
+      await ShippingService.ensureShippingSchema();
       const [rows] = await pool.query(
         `SELECT s.id, s.name, s.slug, s.whatsapp_number, s.address, st.*
          FROM stores s
@@ -32,6 +34,7 @@ const AdminStoreController = {
 
   updateSettings: async (req, res, next) => {
     try {
+      await ShippingService.ensureShippingSchema();
       const storeId = req.storeId;
       const {
         logo_url,
@@ -59,6 +62,14 @@ const AdminStoreController = {
         flat_delivery_cost,
         free_shipping_min,
         shipping_zones,
+        origin_postal_code,
+        andreani_enabled,
+        andreani_user,
+        andreani_password,
+        andreani_contract,
+        correo_enabled,
+        correo_api_key,
+        correo_agreement,
       } = req.body;
 
       const serializedZones =
@@ -94,7 +105,15 @@ const AdminStoreController = {
           pickup_enabled = COALESCE(?, pickup_enabled),
           flat_delivery_cost = COALESCE(?, flat_delivery_cost),
           free_shipping_min = ?,
-          shipping_zones = COALESCE(?, shipping_zones)
+          shipping_zones = COALESCE(?, shipping_zones),
+          origin_postal_code = COALESCE(?, origin_postal_code),
+          andreani_enabled = COALESCE(?, andreani_enabled),
+          andreani_user = COALESCE(?, andreani_user),
+          andreani_password = COALESCE(?, andreani_password),
+          andreani_contract = COALESCE(?, andreani_contract),
+          correo_enabled = COALESCE(?, correo_enabled),
+          correo_api_key = COALESCE(?, correo_api_key),
+          correo_agreement = COALESCE(?, correo_agreement)
          WHERE store_id = ?`,
         [
           logo_url ?? null,
@@ -130,6 +149,14 @@ const AdminStoreController = {
             ? Number(free_shipping_min)
             : null,
           serializedZones,
+          origin_postal_code ?? null,
+          andreani_enabled !== undefined ? (andreani_enabled ? 1 : 0) : null,
+          andreani_user ?? null,
+          andreani_password ?? null,
+          andreani_contract ?? null,
+          correo_enabled !== undefined ? (correo_enabled ? 1 : 0) : null,
+          correo_api_key ?? null,
+          correo_agreement ?? null,
           storeId,
         ],
       );
@@ -228,7 +255,6 @@ const AdminStoreController = {
     try {
       const storeId = req.storeId;
 
-      // 1. Métricas de pedidos del comercio
       const [orderStats] = await pool.query(
         `SELECT 
           COUNT(*) AS total_orders,
@@ -240,7 +266,6 @@ const AdminStoreController = {
         [storeId],
       );
 
-      // 2. Métricas de catálogo y variantes con stock bajo
       const [productStats] = await pool.query(
         `SELECT 
           COUNT(DISTINCT p.id) AS total_products,
@@ -304,7 +329,6 @@ const AdminStoreController = {
       ]);
       res.status(200).json({ success: true });
     } catch (error) {
-      // Si tiene productos asociados, MySQL lanza ER_ROW_IS_REFERENCED_2
       if (error.code === "ER_ROW_IS_REFERENCED_2") {
         return res.status(400).json({
           success: false,

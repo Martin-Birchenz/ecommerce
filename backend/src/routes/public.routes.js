@@ -23,5 +23,6 @@ router.post(
   OrderController.createMercadoPagoPreference,
 );
 router.post("/coupons/validate", CouponController.validatePublicCoupon);
+router.post("/shipping/quote", OrderController.quotePublicShipping);
 
 module.exports = router;

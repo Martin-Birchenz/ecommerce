@@ -56,5 +56,13 @@ router.patch("/coupons/:id/toggle", CouponController.toggleCoupon);
 router.put("/categories/:id", AdminStoreController.updateCategory);
 router.delete("/categories/:id", AdminStoreController.deleteCategory);
 router.delete("/subcategories/:id", AdminStoreController.deleteSubcategory);
+router.post(
+  "/orders/:id/shipping-label",
+  OrderController.generateShippingLabel,
+);
+router.get(
+  "/orders/:id/shipping-label/print",
+  OrderController.printShippingLabel,
+);
 
 module.exports = router;

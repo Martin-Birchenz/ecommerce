@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Save, Upload, Plus, Trash2 } from "lucide-react";
+import { Save, Upload, Plus, Trash2, Truck } from "lucide-react";
 import api from "../../config/api.js";
 
 export default function ThemeSettings() {
@@ -26,6 +26,14 @@ export default function ThemeSettings() {
           delivery_enabled: Boolean(s.delivery_enabled),
           pickup_enabled: Boolean(s.pickup_enabled),
           free_shipping_min: s.free_shipping_min ?? "",
+          origin_postal_code: s.origin_postal_code || "",
+          andreani_enabled: Boolean(s.andreani_enabled),
+          andreani_user: s.andreani_user || "",
+          andreani_password: s.andreani_password || "",
+          andreani_contract: s.andreani_contract || "",
+          correo_enabled: Boolean(s.correo_enabled),
+          correo_api_key: s.correo_api_key || "",
+          correo_agreement: s.correo_agreement || "",
         });
 
         let parsedZones = [];
@@ -93,7 +101,7 @@ export default function ThemeSettings() {
         shipping_zones: cleanZones,
       });
       setMessage(
-        "Cambios guardados. Tu tienda pública ya refleja la nueva identidad.",
+        "Cambios guardados. Tu tienda pública ya refleja la nueva identidad y logística.",
       );
     } catch (err) {
       alert(err.response?.data?.message || "Error al guardar configuración");
@@ -117,8 +125,8 @@ export default function ThemeSettings() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Diseño y Marca</h1>
           <p className="text-sm text-slate-500">
-            Personalizá colores, imágenes, envíos y medios de cobro de tu
-            tienda.
+            Personalizá colores, imágenes, logística automatizada y medios de
+            cobro.
           </p>
         </div>
         <button
@@ -251,7 +259,7 @@ export default function ThemeSettings() {
         </div>
       </div>
 
-      {/* Contacto y Envíos con Zonas */}
+      {/* Contacto y Envíos con Zonas + Correo Argentino / Andreani */}
       <div className="bg-white border rounded-xl p-5 space-y-4">
         <h2 className="font-bold text-sm text-slate-900">
           Contacto, Horarios y Logística
@@ -259,7 +267,7 @@ export default function ThemeSettings() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-xs font-semibold text-slate-600 mb-1">
-              WhatsApp de Pedidos (con código de país, ej: 5493435123456)
+              WhatsApp de Pedidos (ej: 5493435123456)
             </label>
             <input
               type="text"
@@ -278,6 +286,20 @@ export default function ThemeSettings() {
               type="text"
               value={form.address || ""}
               onChange={(e) => setForm({ ...form, address: e.target.value })}
+              className="w-full px-3 py-2 border rounded-lg text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">
+              Código Postal de Origen (para cotizar envíos)
+            </label>
+            <input
+              type="text"
+              placeholder="Ej: 3150"
+              value={form.origin_postal_code || ""}
+              onChange={(e) =>
+                setForm({ ...form, origin_postal_code: e.target.value })
+              }
               className="w-full px-3 py-2 border rounded-lg text-sm"
             />
           </div>
@@ -308,9 +330,9 @@ export default function ThemeSettings() {
               className="w-full px-3 py-2 border rounded-lg text-sm"
             />
           </div>
-          <div className="sm:col-span-2">
+          <div>
             <label className="block text-xs font-semibold text-slate-600 mb-1">
-              Envío Gratis a partir de ($ opcional — dejar vacío si no aplica)
+              Envío Gratis a partir de ($ opcional)
             </label>
             <input
               type="number"
@@ -320,7 +342,7 @@ export default function ThemeSettings() {
               onChange={(e) =>
                 setForm({ ...form, free_shipping_min: e.target.value })
               }
-              className="w-full sm:w-64 px-3 py-2 border rounded-lg text-sm"
+              className="w-full px-3 py-2 border rounded-lg text-sm"
             />
           </div>
         </div>
@@ -348,12 +370,107 @@ export default function ThemeSettings() {
           </label>
         </div>
 
+        {/* Logística Nacional Automatizada: Andreani y Correo Argentino */}
+        {form.delivery_enabled && (
+          <div className="border-t pt-4 space-y-4">
+            <div className="flex items-center gap-2">
+              <Truck className="w-4 h-4 text-slate-700" />
+              <span className="text-xs font-bold uppercase text-slate-600">
+                Logística Nacional Automatizada (Cotización por CP y Etiquetas)
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Andreani */}
+              <div className="p-4 border rounded-xl space-y-2.5 bg-slate-50/50">
+                <label className="flex items-center gap-2 text-sm font-bold text-slate-900">
+                  <input
+                    type="checkbox"
+                    checked={form.andreani_enabled}
+                    onChange={(e) =>
+                      setForm({ ...form, andreani_enabled: e.target.checked })
+                    }
+                  />
+                  Habilitar Andreani
+                </label>
+                {form.andreani_enabled && (
+                  <div className="space-y-2 pt-1">
+                    <input
+                      type="text"
+                      placeholder="Usuario API Andreani (opcional para tarifario)"
+                      value={form.andreani_user}
+                      onChange={(e) =>
+                        setForm({ ...form, andreani_user: e.target.value })
+                      }
+                      className="w-full px-3 py-1.5 border rounded-lg text-xs bg-white"
+                    />
+                    <input
+                      type="password"
+                      placeholder="Contraseña API Andreani"
+                      value={form.andreani_password}
+                      onChange={(e) =>
+                        setForm({ ...form, andreani_password: e.target.value })
+                      }
+                      className="w-full px-3 py-1.5 border rounded-lg text-xs bg-white"
+                    />
+                    <input
+                      type="text"
+                      placeholder="N° de Contrato Andreani"
+                      value={form.andreani_contract}
+                      onChange={(e) =>
+                        setForm({ ...form, andreani_contract: e.target.value })
+                      }
+                      className="w-full px-3 py-1.5 border rounded-lg text-xs bg-white"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Correo Argentino */}
+              <div className="p-4 border rounded-xl space-y-2.5 bg-slate-50/50">
+                <label className="flex items-center gap-2 text-sm font-bold text-slate-900">
+                  <input
+                    type="checkbox"
+                    checked={form.correo_enabled}
+                    onChange={(e) =>
+                      setForm({ ...form, correo_enabled: e.target.checked })
+                    }
+                  />
+                  Habilitar Correo Argentino (MiCorreo)
+                </label>
+                {form.correo_enabled && (
+                  <div className="space-y-2 pt-1">
+                    <input
+                      type="password"
+                      placeholder="API Key / Token MiCorreo (opcional para tarifario)"
+                      value={form.correo_api_key}
+                      onChange={(e) =>
+                        setForm({ ...form, correo_api_key: e.target.value })
+                      }
+                      className="w-full px-3 py-1.5 border rounded-lg text-xs bg-white"
+                    />
+                    <input
+                      type="text"
+                      placeholder="ID Cliente / Acuerdo MiCorreo"
+                      value={form.correo_agreement}
+                      onChange={(e) =>
+                        setForm({ ...form, correo_agreement: e.target.value })
+                      }
+                      className="w-full px-3 py-1.5 border rounded-lg text-xs bg-white"
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Zonas de Envío */}
         {form.delivery_enabled && (
           <div className="border-t pt-4 space-y-2.5">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold uppercase text-slate-500">
-                Zonas de Envío Personalizadas (Opcional)
+                Zonas de Envío Locales (Opcional)
               </span>
               <button
                 type="button"
@@ -365,8 +482,8 @@ export default function ThemeSettings() {
             </div>
             {zones.length === 0 ? (
               <p className="text-xs text-slate-400">
-                Si no cargás zonas, se usará la Tarifa Plana en todos los
-                envíos.
+                Si no cargás zonas, se usará la Tarifa Plana o la cotización por
+                Código Postal.
               </p>
             ) : (
               <div className="space-y-2">

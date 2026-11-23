@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Printer } from "lucide-react";
+import { Printer, Truck } from "lucide-react";
 import api from "../../config/api.js";
 
 const STATUS_LABELS = {
@@ -14,12 +14,13 @@ export default function Orders() {
   const [orders, setOrders] = useState([]);
   const [filterStatus, setFilterStatus] = useState("all");
   const [loading, setLoading] = useState(true);
+  const [generatingLabelId, setGeneratingLabelId] = useState(null);
 
   const loadOrders = async (status = filterStatus) => {
     setLoading(true);
     try {
       const res = await api.get(`/admin/orders?status=${status}`);
-      setOrders(res.data.data);
+      setOrders(res.data.data || []);
     } finally {
       setLoading(false);
     }
@@ -43,6 +44,33 @@ export default function Orders() {
       loadOrders(filterStatus);
     } catch (err) {
       alert(err.response?.data?.message || "No se pudo actualizar el estado");
+    }
+  };
+
+  const handleGenerateAndPrintLabel = async (order, carrier = null) => {
+    setGeneratingLabelId(order.id);
+    try {
+      await api.post(`/admin/orders/${order.id}/shipping-label`, {
+        carrier,
+      });
+      await loadOrders(filterStatus);
+
+      const htmlRes = await api.get(
+        `/admin/orders/${order.id}/shipping-label/print`,
+        { responseType: "text" },
+      );
+      const win = window.open("", "_blank", "width=460,height=680");
+      if (win) {
+        win.document.write(htmlRes.data);
+        win.document.close();
+      }
+    } catch (err) {
+      alert(
+        err.response?.data?.message ||
+          "No se pudo generar la etiqueta de envío",
+      );
+    } finally {
+      setGeneratingLabelId(null);
     }
   };
 
@@ -84,6 +112,7 @@ export default function Orders() {
               ? `Envío: ${order.shipping_address || ""}`
               : "Retiro en local"
           }</p>
+          ${order.shipping_tracking_code ? `<p><strong>Tracking:</strong> ${order.shipping_tracking_code}</p>` : ""}
           ${order.shipping_notes ? `<p><strong>Notas:</strong> ${order.shipping_notes}</p>` : ""}
           <p><strong>Pago:</strong> ${order.payment_method.toUpperCase()}</p>
           <hr/>
@@ -121,8 +150,8 @@ export default function Orders() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Pedidos</h1>
           <p className="text-sm text-slate-500">
-            Confirmá pagos por transferencia, prepará entregas o imprimí
-            comandas.
+            Confirmá pagos, generá etiquetas de Correo Argentino / Andreani o
+            imprimí comandas.
           </p>
         </div>
 
@@ -161,6 +190,8 @@ export default function Orders() {
         <div className="space-y-4">
           {orders.map((order) => {
             const badge = STATUS_LABELS[order.status] || STATUS_LABELS.pending;
+            const isBusy = generatingLabelId === order.id;
+
             return (
               <div
                 key={order.id}
@@ -168,7 +199,7 @@ export default function Orders() {
               >
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
                   <div>
-                    <div className="flex items-center gap-2.5">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span className="font-extrabold text-slate-900">
                         #{order.order_number}
                       </span>
@@ -177,6 +208,14 @@ export default function Orders() {
                       >
                         {badge.text}
                       </span>
+                      {order.shipping_tracking_code && (
+                        <span className="text-xs font-mono font-bold px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-800 border border-indigo-200">
+                          {order.shipping_carrier === "andreani"
+                            ? "Andreani"
+                            : "Correo Arg."}{" "}
+                          · {order.shipping_tracking_code}
+                        </span>
+                      )}
                       <span className="text-xs text-slate-400">
                         {new Date(order.created_at).toLocaleString("es-AR")}
                       </span>
@@ -195,7 +234,25 @@ export default function Orders() {
                     )}
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {order.delivery_type === "delivery" &&
+                      order.status !== "cancelled" && (
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() => handleGenerateAndPrintLabel(order)}
+                          title="Generar e imprimir etiqueta de envío"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
+                        >
+                          <Truck className="w-3.5 h-3.5" />
+                          {isBusy
+                            ? "Generando..."
+                            : order.shipping_tracking_code
+                              ? "Reimprimir Etiqueta"
+                              : "Etiqueta Envío"}
+                        </button>
+                      )}
+
                     <button
                       type="button"
                       onClick={() => printOrderTicket(order)}

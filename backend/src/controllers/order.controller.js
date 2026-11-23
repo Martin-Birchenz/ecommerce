@@ -1,8 +1,8 @@
 const pool = require("../config/db.js");
 const OrderService = require("../services/order.service.js");
+const ShippingService = require("../services/shipping.service.js");
 
 const OrderController = {
-  // Público: crear pedido (Guest Checkout)
   createPublicOrder: async (req, res, next) => {
     try {
       const result = await OrderService.createOrder(req.storeId, req.body);
@@ -16,7 +16,15 @@ const OrderController = {
     }
   },
 
-  // Público: generar preferencia de Mercado Pago Checkout Pro
+  quotePublicShipping: async (req, res, next) => {
+    try {
+      const quotes = await ShippingService.quoteRates(req.storeId, req.body);
+      res.status(200).json({ success: true, data: quotes });
+    } catch (error) {
+      next(error);
+    }
+  },
+
   createMercadoPagoPreference: async (req, res, next) => {
     try {
       const orderId = Number(req.body.order_id);
@@ -49,17 +57,25 @@ const OrderController = {
       res.sendStatus(200);
     } catch (error) {
       console.error("[MP Webhook Error]:", error.message);
-      res.sendStatus(200); // Siempre 200 a MP para evitar reintentos infinitos
+      res.sendStatus(200);
     }
   },
 
   // Admin: listar pedidos del comercio con sus ítems
   getAdminOrders: async (req, res, next) => {
     try {
-      const [orders] = await pool.query(
-        `SELECT * FROM orders WHERE store_id = ? ORDER BY created_at DESC LIMIT 100`,
-        [req.storeId],
-      );
+      await ShippingService.ensureShippingSchema();
+      const { status } = req.query;
+      let sql = `SELECT * FROM orders WHERE store_id = ?`;
+      const params = [req.storeId];
+
+      if (status && status !== "all") {
+        sql += " AND status = ?";
+        params.push(status);
+      }
+      sql += " ORDER BY created_at DESC LIMIT 100";
+
+      const [orders] = await pool.query(sql, params);
 
       if (orders.length === 0) {
         return res.status(200).json({ success: true, data: [] });
@@ -77,6 +93,41 @@ const OrderController = {
       }));
 
       res.status(200).json({ success: true, data: enriched });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // Admin: generar etiqueta de envío Correo Argentino / Andreani
+  generateShippingLabel: async (req, res, next) => {
+    try {
+      const orderId = Number(req.params.id);
+      const { carrier } = req.body || {};
+      const labelData = await ShippingService.generateOrderLabel(
+        req.storeId,
+        orderId,
+        carrier,
+      );
+      res.status(200).json({
+        success: true,
+        message: "Etiqueta de envío generada correctamente",
+        data: labelData,
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // Admin: HTML imprimible 10x15cm de etiqueta
+  printShippingLabel: async (req, res, next) => {
+    try {
+      const orderId = Number(req.params.id);
+      const html = await ShippingService.getPrintableLabelHtml(
+        req.storeId,
+        orderId,
+      );
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.status(200).send(html);
     } catch (error) {
       next(error);
     }
@@ -105,7 +156,6 @@ const OrderController = {
 
       const currentOrder = orders[0];
 
-      // Como el stock siempre se reserva al crear la orden, si pasa a 'cancelled' se repone una sola vez
       if (status === "cancelled" && currentOrder.status !== "cancelled") {
         const [items] = await connection.query(
           "SELECT variant_id, quantity FROM order_items WHERE order_id = ? AND store_id = ?",
