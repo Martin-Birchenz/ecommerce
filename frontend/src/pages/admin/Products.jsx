@@ -1,5 +1,14 @@
 import { useEffect, useState } from "react";
-import { Plus, Pencil, Trash2, X, Upload, FolderPlus } from "lucide-react";
+import {
+  Plus,
+  Pencil,
+  Trash2,
+  X,
+  Upload,
+  FolderPlus,
+  Percent,
+  Minus,
+} from "lucide-react";
 import api from "../../config/api.js";
 
 const emptyProductForm = {
@@ -43,12 +52,28 @@ export default function Products() {
   const [uploadingImg, setUploadingImg] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // Estado modal actualización masiva de precios
+  const [showBulkModal, setShowBulkModal] = useState(false);
+  const [bulkSaving, setBulkSaving] = useState(false);
+  const [bulkForm, setBulkForm] = useState({
+    adjustment_type: "percentage",
+    adjustment_value: "",
+    category_id: "",
+    subcategory_id: "",
+    include_variants: true,
+    rounding: "integer",
+  });
+
+  // Estado de ajuste rápido de stock en mostrador
+  const [updatingVariantId, setUpdatingVariantId] = useState(null);
+
   const loadAll = async () => {
     setLoading(true);
     try {
-      const [prodRes, catRes] = await Promise.all([
+      const [prodRes, catRes, subRes] = await Promise.all([
         api.get("/admin/products"),
         api.get("/admin/categories"),
+        api.get("/admin/subcategories").catch(() => ({ data: { data: [] } })),
       ]);
 
       const rawProds = prodRes.data?.data;
@@ -65,9 +90,12 @@ export default function Products() {
           ? rawCats.categories
           : [];
 
-      const subList = Array.isArray(rawCats?.subcategories)
-        ? rawCats.subcategories
-        : [];
+      const rawSubs = subRes.data?.data;
+      const subList = Array.isArray(rawSubs)
+        ? rawSubs
+        : Array.isArray(rawCats?.subcategories)
+          ? rawCats.subcategories
+          : [];
 
       setProducts(prodList);
       setCategories(catList);
@@ -89,6 +117,65 @@ export default function Products() {
   useEffect(() => {
     loadAll();
   }, []);
+
+  const handleQuickStockDelta = async (variantId, delta) => {
+    setUpdatingVariantId(variantId);
+    try {
+      const res = await api.patch(`/admin/variants/${variantId}/stock`, {
+        delta,
+      });
+      const updatedStock = res.data?.data?.stock;
+      if (updatedStock !== undefined) {
+        setProducts((prev) =>
+          prev.map((p) => ({
+            ...p,
+            variants: Array.isArray(p.variants)
+              ? p.variants.map((v) =>
+                  v.id === variantId ? { ...v, stock: updatedStock } : v,
+                )
+              : [],
+          })),
+        );
+      } else {
+        await loadAll();
+      }
+    } catch (err) {
+      alert(err.response?.data?.message || "No se pudo ajustar el stock");
+    } finally {
+      setUpdatingVariantId(null);
+    }
+  };
+
+  const handleBulkPriceSubmit = async (e) => {
+    e.preventDefault();
+    const val = Number(bulkForm.adjustment_value);
+    if (!val || Number.isNaN(val)) {
+      alert("Ingresá un porcentaje o monto distinto de 0");
+      return;
+    }
+    setBulkSaving(true);
+    try {
+      const res = await api.post("/admin/products/bulk-price", {
+        adjustment_type: bulkForm.adjustment_type,
+        adjustment_value: val,
+        category_id: bulkForm.category_id || null,
+        subcategory_id: bulkForm.subcategory_id || null,
+        include_variants: Boolean(bulkForm.include_variants),
+        rounding: bulkForm.rounding,
+      });
+      alert(res.data?.message || "Precios actualizados correctamente");
+      setShowBulkModal(false);
+      setBulkForm((prev) => ({ ...prev, adjustment_value: "" }));
+      await loadAll();
+    } catch (err) {
+      alert(
+        err.response?.data?.message ||
+          "No se pudieron actualizar los precios masivamente",
+      );
+    } finally {
+      setBulkSaving(false);
+    }
+  };
 
   const handleCreateCategory = async (e) => {
     e.preventDefault();
@@ -178,20 +265,23 @@ export default function Products() {
     setUploadingImg(true);
     try {
       const fd = new FormData();
-      fd.append("image", file);
-      const res = await api.post("/admin/upload", fd, {
+      fd.append("images", file);
+      const res = await api.post("/admin/products/upload", fd, {
         headers: { "Content-Type": "multipart/form-data" },
       });
-      setForm((prev) => ({
-        ...prev,
-        images: [
-          ...prev.images,
-          {
-            image_url: res.data.data.url,
-            is_primary: prev.images.length === 0,
-          },
-        ],
-      }));
+      const uploadedUrl = res.data?.data?.[0]?.image_url || res.data?.data?.url;
+      if (uploadedUrl) {
+        setForm((prev) => ({
+          ...prev,
+          images: [
+            ...prev.images,
+            {
+              image_url: uploadedUrl,
+              is_primary: prev.images.length === 0,
+            },
+          ],
+        }));
+      }
     } catch {
       alert("Error al subir imagen");
     } finally {
@@ -293,6 +383,10 @@ export default function Products() {
     (s) => String(s.category_id) === String(form.category_id),
   );
 
+  const filteredSubsForBulk = safeSubcategories.filter(
+    (s) => String(s.category_id) === String(bulkForm.category_id),
+  );
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -301,18 +395,30 @@ export default function Products() {
             Productos y Stock
           </h1>
           <p className="text-sm text-slate-500">
-            Administrá tus categorías, precios, descuentos y variantes de
-            inventario.
+            Administrá categorías, remarcación masiva, variantes e inventario
+            sincronizado con mostrador.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={openNewProduct}
-          disabled={safeCategories.length === 0}
-          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 disabled:opacity-40"
-        >
-          <Plus className="w-4 h-4" /> Nuevo Producto
-        </button>
+
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            type="button"
+            onClick={() => setShowBulkModal(true)}
+            disabled={safeProducts.length === 0}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-800 text-sm font-semibold hover:bg-slate-50 disabled:opacity-40 cursor-pointer"
+          >
+            <Percent className="w-4 h-4" /> Remarcar Precios
+          </button>
+
+          <button
+            type="button"
+            onClick={openNewProduct}
+            disabled={safeCategories.length === 0}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 disabled:opacity-40 cursor-pointer"
+          >
+            <Plus className="w-4 h-4" /> Nuevo Producto
+          </button>
+        </div>
       </div>
 
       {/* Gestor de Categorías y Subcategorías */}
@@ -424,7 +530,9 @@ export default function Products() {
                 <th className="px-4 py-3">Producto</th>
                 <th className="px-4 py-3">Categoría</th>
                 <th className="px-4 py-3">Precio</th>
-                <th className="px-4 py-3">Variantes y Stock</th>
+                <th className="px-4 py-3">
+                  Variantes y Stock (Ajuste Mostrador)
+                </th>
                 <th className="px-4 py-3">Estado</th>
                 <th className="px-4 py-3 text-right">Acciones</th>
               </tr>
@@ -469,19 +577,43 @@ export default function Products() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-xs">
-                      <div className="flex flex-wrap gap-1">
-                        {variants.map((v) => (
-                          <span
-                            key={v.id}
-                            className={`px-2 py-0.5 rounded border ${
-                              v.stock <= v.min_stock_alert
-                                ? "bg-amber-50 border-amber-300 text-amber-800 font-semibold"
-                                : "bg-slate-50 text-slate-700"
-                            }`}
-                          >
-                            {v.attribute_value}: {v.stock}
-                          </span>
-                        ))}
+                      <div className="flex flex-wrap gap-1.5">
+                        {variants.map((v) => {
+                          const isBusy = updatingVariantId === v.id;
+                          return (
+                            <span
+                              key={v.id}
+                              className={`inline-flex items-center gap-1.5 px-2 py-1 rounded border ${
+                                v.stock <= v.min_stock_alert
+                                  ? "bg-amber-50 border-amber-300 text-amber-900 font-semibold"
+                                  : "bg-slate-50 text-slate-700"
+                              }`}
+                            >
+                              <span>{v.attribute_value}:</span>
+                              <button
+                                type="button"
+                                disabled={isBusy || v.stock <= 0}
+                                onClick={() => handleQuickStockDelta(v.id, -1)}
+                                title="Descontar 1 unidad por venta en mostrador"
+                                className="w-5 h-5 rounded bg-white border hover:bg-slate-100 flex items-center justify-center disabled:opacity-40 cursor-pointer"
+                              >
+                                <Minus className="w-3 h-3" />
+                              </button>
+                              <strong className="min-w-[1.25rem] text-center">
+                                {v.stock}
+                              </strong>
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() => handleQuickStockDelta(v.id, 1)}
+                                title="Sumar 1 unidad de ingreso"
+                                className="w-5 h-5 rounded bg-white border hover:bg-slate-100 flex items-center justify-center disabled:opacity-40 cursor-pointer"
+                              >
+                                <Plus className="w-3 h-3" />
+                              </button>
+                            </span>
+                          );
+                        })}
                       </div>
                       <span className="text-[11px] text-slate-400 block mt-1">
                         Total: {totalStock} u.
@@ -522,6 +654,173 @@ export default function Products() {
               )}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Modal Actualización Masiva de Precios */}
+      {showBulkModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <form
+            onSubmit={handleBulkPriceSubmit}
+            className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl"
+          >
+            <div className="flex items-center justify-between border-b pb-3">
+              <h2 className="font-bold text-lg text-slate-900">
+                Remarcación Masiva de Precios
+              </h2>
+              <button
+                type="button"
+                onClick={() => setShowBulkModal(false)}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold mb-1">
+                  Tipo de Ajuste
+                </label>
+                <select
+                  value={bulkForm.adjustment_type}
+                  onChange={(e) =>
+                    setBulkForm({
+                      ...bulkForm,
+                      adjustment_type: e.target.value,
+                    })
+                  }
+                  className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
+                >
+                  <option value="percentage">Porcentaje (%)</option>
+                  <option value="fixed">Monto Fijo ($)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold mb-1">
+                  Valor (+ aumento / - rebaja) *
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  required
+                  placeholder={
+                    bulkForm.adjustment_type === "percentage"
+                      ? "Ej: 15 o -10"
+                      : "Ej: 2500"
+                  }
+                  value={bulkForm.adjustment_value}
+                  onChange={(e) =>
+                    setBulkForm({
+                      ...bulkForm,
+                      adjustment_value: e.target.value,
+                    })
+                  }
+                  className="w-full px-3 py-2 border rounded-lg text-sm"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold mb-1">
+                  Filtrar Categoría
+                </label>
+                <select
+                  value={bulkForm.category_id}
+                  onChange={(e) =>
+                    setBulkForm({
+                      ...bulkForm,
+                      category_id: e.target.value,
+                      subcategory_id: "",
+                    })
+                  }
+                  className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
+                >
+                  <option value="">Todo el catálogo</option>
+                  {safeCategories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold mb-1">
+                  Filtrar Subcategoría
+                </label>
+                <select
+                  value={bulkForm.subcategory_id}
+                  disabled={!bulkForm.category_id}
+                  onChange={(e) =>
+                    setBulkForm({
+                      ...bulkForm,
+                      subcategory_id: e.target.value,
+                    })
+                  }
+                  className="w-full px-3 py-2 border rounded-lg text-sm bg-white disabled:opacity-50"
+                >
+                  <option value="">Todas las subcategorías</option>
+                  {filteredSubsForBulk.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold mb-1">
+                Redondeo de Precios Resultantes
+              </label>
+              <select
+                value={bulkForm.rounding}
+                onChange={(e) =>
+                  setBulkForm({ ...bulkForm, rounding: e.target.value })
+                }
+                className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
+              >
+                <option value="integer">Sin centavos (entero)</option>
+                <option value="10">Múltiplo de $10</option>
+                <option value="100">Múltiplo de $100</option>
+                <option value="none">Exacto con 2 decimales</option>
+              </select>
+            </div>
+
+            <label className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+              <input
+                type="checkbox"
+                checked={bulkForm.include_variants}
+                onChange={(e) =>
+                  setBulkForm({
+                    ...bulkForm,
+                    include_variants: e.target.checked,
+                  })
+                }
+              />
+              Aplicar también a variantes con precio especial
+            </label>
+
+            <div className="flex justify-end gap-2 pt-3 border-t">
+              <button
+                type="button"
+                onClick={() => setShowBulkModal(false)}
+                className="px-4 py-2 border rounded-lg text-xs font-semibold"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={bulkSaving}
+                className="px-5 py-2 bg-slate-900 text-white rounded-lg text-xs font-bold disabled:opacity-50"
+              >
+                {bulkSaving ? "Aplicando..." : "Aplicar Remarcación"}
+              </button>
+            </div>
+          </form>
         </div>
       )}
 

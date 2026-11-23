@@ -22,6 +22,7 @@ router.post(
   validate(createProductSchema),
   ProductController.createProduct,
 );
+router.post("/products/bulk-price", ProductController.bulkUpdatePrices);
 router.post(
   "/products/upload",
   upload.array("images", 5),

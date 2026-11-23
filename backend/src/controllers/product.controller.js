@@ -1,6 +1,14 @@
 const pool = require("../config/db.js");
 const ProductRepository = require("../repositories/product.repository.js");
 
+const applyRounding = (value, rounding) => {
+  const num = Math.max(0, Number(value));
+  if (rounding === "integer") return Math.round(num);
+  if (rounding === "10") return Math.round(num / 10) * 10;
+  if (rounding === "100") return Math.round(num / 100) * 100;
+  return Number(num.toFixed(2));
+};
+
 const ProductController = {
   // 1. Público: catálogo activo filtrado por tienda, categoría, subcategoría o búsqueda
   getPublicCatalog: async (req, res, next) => {
@@ -140,7 +148,114 @@ const ProductController = {
     }
   },
 
-  // 7. Admin: toggle rápido de visibilidad (is_active) o destacado (is_featured)
+  // 7. Admin: actualización masiva de precios (porcentaje o monto fijo, filtrado por categoría/subcategoría)
+  bulkUpdatePrices: async (req, res, next) => {
+    const connection = await pool.getConnection();
+    try {
+      const {
+        adjustment_type, // 'percentage' | 'fixed'
+        adjustment_value, // número (positivo para aumentar, negativo para rebajar)
+        category_id, // opcional
+        subcategory_id, // opcional
+        include_variants = true,
+        rounding = "none", // 'none' | 'integer' | '10' | '100'
+      } = req.body;
+
+      const numericValue = Number(adjustment_value);
+      if (
+        !["percentage", "fixed"].includes(adjustment_type) ||
+        Number.isNaN(numericValue) ||
+        numericValue === 0
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Indicá un tipo y valor de ajuste válido distinto de 0",
+        });
+      }
+
+      await connection.beginTransaction();
+
+      let whereSql = "WHERE store_id = ?";
+      const params = [req.storeId];
+
+      if (category_id) {
+        whereSql += " AND category_id = ?";
+        params.push(Number(category_id));
+      }
+      if (subcategory_id) {
+        whereSql += " AND subcategory_id = ?";
+        params.push(Number(subcategory_id));
+      }
+
+      const [products] = await connection.query(
+        `SELECT id, base_price, compare_at_price FROM products ${whereSql} FOR UPDATE`,
+        params,
+      );
+
+      if (products.length === 0) {
+        await connection.rollback();
+        return res.status(404).json({
+          success: false,
+          message: "No hay productos en el filtro seleccionado",
+        });
+      }
+
+      const calcNewPrice = (oldPrice) => {
+        const base = Number(oldPrice);
+        const raw =
+          adjustment_type === "percentage"
+            ? base * (1 + numericValue / 100)
+            : base + numericValue;
+        return applyRounding(raw, rounding);
+      };
+
+      for (const prod of products) {
+        const nextBase = calcNewPrice(prod.base_price);
+        const nextCompare =
+          prod.compare_at_price !== null
+            ? calcNewPrice(prod.compare_at_price)
+            : null;
+
+        await connection.query(
+          "UPDATE products SET base_price = ?, compare_at_price = ? WHERE id = ? AND store_id = ?",
+          [nextBase, nextCompare, prod.id, req.storeId],
+        );
+      }
+
+      if (include_variants) {
+        const productIds = products.map((p) => p.id);
+        const placeholders = productIds.map(() => "?").join(",");
+        const [variants] = await connection.query(
+          `SELECT id, price_override FROM product_variants
+           WHERE store_id = ? AND product_id IN (${placeholders}) AND price_override IS NOT NULL
+           FOR UPDATE`,
+          [req.storeId, ...productIds],
+        );
+
+        for (const v of variants) {
+          const nextOverride = calcNewPrice(v.price_override);
+          await connection.query(
+            "UPDATE product_variants SET price_override = ? WHERE id = ? AND store_id = ?",
+            [nextOverride, v.id, req.storeId],
+          );
+        }
+      }
+
+      await connection.commit();
+      res.status(200).json({
+        success: true,
+        message: `Precios actualizados en ${products.length} producto(s)`,
+        data: { updated_count: products.length },
+      });
+    } catch (error) {
+      await connection.rollback();
+      next(error);
+    } finally {
+      connection.release();
+    }
+  },
+
+  // 8. Admin: toggle rápido de visibilidad (is_active) o destacado (is_featured)
   toggleFlag: async (req, res, next) => {
     try {
       const { id } = req.params;
