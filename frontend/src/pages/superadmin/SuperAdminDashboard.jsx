@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { Plus, ExternalLink, Store, LogOut, ShieldCheck } from "lucide-react";
 import { useAuth } from "../../context/AuthContext.jsx";
 import api from "../../config/api.js";
@@ -42,10 +42,6 @@ export default function SuperAdminDashboard() {
       loadStores();
     }
   }, [isAuthenticated, user?.role]);
-
-  if (!isAuthenticated || user?.role !== "superadmin") {
-    return <Navigate to="/admin/login" replace />;
-  }
 
   const handleNameChange = (value) => {
     const generatedSlug = value
@@ -99,6 +95,7 @@ export default function SuperAdminDashboard() {
     try {
       const res = await api.post(`/superadmin/stores/${storeId}/impersonate`);
       const { token, user: storeUser } = res.data.data;
+
       if (startImpersonation) {
         startImpersonation(token, storeUser);
       } else {
@@ -113,7 +110,8 @@ export default function SuperAdminDashboard() {
         localStorage.setItem("token", token);
         localStorage.setItem("user", JSON.stringify(storeUser));
       }
-      navigate("/admin/dashboard");
+
+      window.location.href = "/admin/dashboard";
     } catch (err) {
       alert(err.response?.data?.message || "No se pudo ingresar a la tienda");
     }

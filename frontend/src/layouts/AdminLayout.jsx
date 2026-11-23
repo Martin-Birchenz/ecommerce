@@ -28,7 +28,7 @@ export default function AdminLayout() {
   const isImpersonating =
     Boolean(safeUser.impersonatedBySuperAdmin) ||
     safeUser.role === "superadmin" ||
-    Boolean(sessionStorage.getItem("superadmin_backup_token"));
+    Boolean(localStorage.getItem("superadmin_backup_token"));
 
   const handleLogout = () => {
     if (logout) logout();
@@ -39,7 +39,7 @@ export default function AdminLayout() {
     if (stopImpersonation) {
       stopImpersonation();
     }
-    navigate("/superadmin");
+    window.location.href = "/superadmin";
   };
 
   return (
