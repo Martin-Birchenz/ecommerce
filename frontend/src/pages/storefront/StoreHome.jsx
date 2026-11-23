@@ -1,17 +1,45 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Search, SlidersHorizontal } from "lucide-react";
-import { useTenant } from "../../context/StoreContext.jsx";
+import { useStore } from "../../context/StoreContext.jsx";
+import api from "../../config/api.js";
 import ProductCard from "../../components/storefront/ProductCard.jsx";
 import ProductDetailModal from "../../components/storefront/ProductDetailModal.jsx";
 
 export default function StoreHome() {
-  const { storeData } = useTenant();
-  const { settings, categories, subcategories, products } = storeData;
+  const { slug, store, categories: ctxCategories } = useStore() || {};
+  const settings = store?.settings || store || {};
+
+  const [products, setProducts] = useState([]);
+  const [subcategories, setSubcategories] = useState([]);
+  const [loadingProducts, setLoadingProducts] = useState(true);
 
   const [selectedCat, setSelectedCat] = useState("all");
   const [selectedSub, setSelectedSub] = useState("all");
   const [search, setSearch] = useState("");
   const [selectedProduct, setSelectedProduct] = useState(null);
+
+  useEffect(() => {
+    if (!slug) return;
+    setLoadingProducts(true);
+    api
+      .get(`/public/${slug}/products`)
+      .then((res) => {
+        const payload = res.data?.data;
+        const list = Array.isArray(payload)
+          ? payload
+          : Array.isArray(payload?.products)
+            ? payload.products
+            : [];
+        setProducts(list);
+        if (Array.isArray(payload?.subcategories)) {
+          setSubcategories(payload.subcategories);
+        }
+      })
+      .catch(() => setProducts([]))
+      .finally(() => setLoadingProducts(false));
+  }, [slug]);
+
+  const categories = Array.isArray(ctxCategories) ? ctxCategories : [];
 
   const visibleSubcategories =
     selectedCat === "all"
@@ -22,7 +50,7 @@ export default function StoreHome() {
 
   const filteredProducts = products.filter((p) => {
     const matchesSearch =
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
+      (p.name || "").toLowerCase().includes(search.toLowerCase()) ||
       (p.description || "").toLowerCase().includes(search.toLowerCase());
 
     if (!matchesSearch) return false;
@@ -42,6 +70,8 @@ export default function StoreHome() {
     setSelectedSub("all");
   };
 
+  if (!store) return null;
+
   return (
     <div className="max-w-6xl mx-auto px-4 py-6 sm:py-8">
       {/* Hero Banner */}
@@ -49,7 +79,7 @@ export default function StoreHome() {
         {settings.banner_url && (
           <img
             src={settings.banner_url}
-            alt={settings.hero_title || storeData.store.name}
+            alt={settings.hero_title || store.name}
             className="w-full h-56 sm:h-72 object-cover opacity-55"
           />
         )}
@@ -59,7 +89,7 @@ export default function StoreHome() {
           } flex flex-col justify-center px-6 sm:px-10 max-w-2xl`}
         >
           <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight leading-tight">
-            {settings.hero_title || `Bienvenidos a ${storeData.store.name}`}
+            {settings.hero_title || `Bienvenidos a ${store.name}`}
           </h1>
           {settings.hero_subtitle && (
             <p className="mt-2 text-sm sm:text-base text-slate-100/90">
@@ -93,7 +123,7 @@ export default function StoreHome() {
             }`}
             style={
               selectedCat === "all"
-                ? { backgroundColor: "var(--store-primary)" }
+                ? { backgroundColor: "var(--color-primary, #0f172a)" }
                 : undefined
             }
           >
@@ -114,7 +144,7 @@ export default function StoreHome() {
                 }`}
                 style={
                   active
-                    ? { backgroundColor: "var(--store-primary)" }
+                    ? { backgroundColor: "var(--color-primary, #0f172a)" }
                     : undefined
                 }
               >
@@ -139,7 +169,7 @@ export default function StoreHome() {
               }`}
               style={
                 selectedSub === "all"
-                  ? { backgroundColor: "var(--store-secondary)" }
+                  ? { backgroundColor: "var(--color-secondary, #2563eb)" }
                   : undefined
               }
             >
@@ -159,7 +189,7 @@ export default function StoreHome() {
                   }`}
                   style={
                     active
-                      ? { backgroundColor: "var(--store-secondary)" }
+                      ? { backgroundColor: "var(--color-secondary, #2563eb)" }
                       : undefined
                   }
                 >
@@ -172,7 +202,11 @@ export default function StoreHome() {
       </section>
 
       {/* Grilla */}
-      {filteredProducts.length === 0 ? (
+      {loadingProducts ? (
+        <div className="bg-white rounded-xl border p-12 text-center text-slate-500 text-sm">
+          Cargando catálogo...
+        </div>
+      ) : filteredProducts.length === 0 ? (
         <div className="bg-white rounded-xl border p-12 text-center text-slate-500">
           No encontramos productos que coincidan con tu búsqueda.
         </div>

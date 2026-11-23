@@ -10,32 +10,40 @@ import {
   Truck,
 } from "lucide-react";
 import { useCart } from "../../context/CartContext.jsx";
-import { useTenant } from "../../context/StoreContext.jsx";
+import { useStore } from "../../context/StoreContext.jsx";
 import api from "../../config/api.js";
 
 export default function CartDrawer() {
+  const cart = useCart() || {};
   const {
-    items,
-    subtotal,
-    isCartOpen,
-    setIsCartOpen,
-    updateQty,
-    removeItem,
-    clearCart,
-  } = useCart();
-  const { storeData } = useTenant();
-  const { store, settings } = storeData;
+    items = [],
+    subtotal = 0,
+    updateQty = () => {},
+    removeItem = () => {},
+    clearCart = () => {},
+  } = cart;
 
-  const shippingZones = Array.isArray(settings.shipping_zones)
-    ? settings.shipping_zones
-    : typeof settings.shipping_zones === "string"
-      ? JSON.parse(settings.shipping_zones || "[]")
-      : [];
+  const isOpen = cart.isOpen ?? cart.isCartOpen ?? false;
+  const setIsOpen = cart.setIsOpen || cart.setIsCartOpen || (() => {});
+
+  const { slug, store } = useStore() || {};
+  const settings = store?.settings || store || {};
+
+  let shippingZones = [];
+  try {
+    shippingZones = Array.isArray(settings.shipping_zones)
+      ? settings.shipping_zones
+      : typeof settings.shipping_zones === "string"
+        ? JSON.parse(settings.shipping_zones || "[]")
+        : [];
+  } catch {
+    shippingZones = [];
+  }
 
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [deliveryType, setDeliveryType] = useState(
-    settings.pickup_enabled ? "pickup" : "delivery",
+    settings.pickup_enabled === false ? "delivery" : "pickup",
   );
   const [selectedZoneName, setSelectedZoneName] = useState(
     shippingZones[0]?.name || "",
@@ -66,7 +74,6 @@ export default function CartDrawer() {
     }
   }, [shippingZones, selectedZoneName]);
 
-  // Recalcular descuento si cambia el subtotal con un cupón aplicado
   useEffect(() => {
     if (!appliedCoupon) return;
     if (subtotal <= 0) {
@@ -80,14 +87,13 @@ export default function CartDrawer() {
     setAppliedCoupon((prev) => ({ ...prev, discount_amount: newDiscount }));
   }, [subtotal]);
 
-  if (!isCartOpen) return null;
+  if (!isOpen || !store) return null;
 
   const discountAmount = appliedCoupon
     ? Number(appliedCoupon.discount_amount)
     : 0;
   const netMerchandise = Math.max(0, subtotal - discountAmount);
 
-  // Cálculo de envío (zona o tarifa plana, y regla de envío gratis)
   const freeShippingMin = settings.free_shipping_min
     ? Number(settings.free_shipping_min)
     : null;
@@ -110,7 +116,7 @@ export default function CartDrawer() {
     setCouponError("");
     setValidatingCoupon(true);
     try {
-      const res = await api.post("/public/coupons/validate", {
+      const res = await api.post(`/public/${slug}/coupons/validate`, {
         code: couponInput.trim(),
         subtotal,
       });
@@ -130,7 +136,7 @@ export default function CartDrawer() {
     setSubmitting(true);
 
     try {
-      const orderRes = await api.post("/public/orders", {
+      const orderRes = await api.post(`/public/${slug}/orders`, {
         customer_name: customerName,
         customer_phone: customerPhone,
         delivery_type: deliveryType,
@@ -152,10 +158,8 @@ export default function CartDrawer() {
 
       if (paymentMethod === "mercadopago") {
         const mpRes = await api.post(
-          "/public/payments/mercadopago/preference",
-          {
-            order_id: createdOrder.id,
-          },
+          `/public/${slug}/payments/mercadopago/preference`,
+          { order_id: createdOrder.id },
         );
         clearCart();
         window.location.href = mpRes.data.data.init_point;
@@ -176,7 +180,7 @@ export default function CartDrawer() {
   };
 
   const buildWhatsAppLink = (order) => {
-    const lines = order.items
+    const lines = (order.items || [])
       .map(
         (i) =>
           `• ${i.quantity}x ${i.product_name_snapshot} (${i.variant_label_snapshot}) - $${Number(
@@ -216,7 +220,7 @@ export default function CartDrawer() {
             type="button"
             onClick={() => {
               setConfirmedOrder(null);
-              setIsCartOpen(false);
+              setIsOpen(false);
             }}
             className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500"
           >
@@ -456,7 +460,7 @@ export default function CartDrawer() {
                 2. Entrega
               </h3>
               <div className="grid grid-cols-2 gap-2">
-                {settings.pickup_enabled && (
+                {settings.pickup_enabled !== false && (
                   <button
                     type="button"
                     onClick={() => setDeliveryType("pickup")}
@@ -470,7 +474,7 @@ export default function CartDrawer() {
                     <span className="block text-[11px] opacity-80">Gratis</span>
                   </button>
                 )}
-                {settings.delivery_enabled && (
+                {settings.delivery_enabled !== false && (
                   <button
                     type="button"
                     onClick={() => setDeliveryType("delivery")}
@@ -553,7 +557,7 @@ export default function CartDrawer() {
                     </span>
                   </label>
                 )}
-                {settings.transfer_enabled && (
+                {settings.transfer_enabled !== false && (
                   <label className="flex items-center gap-2.5 p-2.5 border rounded-lg cursor-pointer text-sm">
                     <input
                       type="radio"
@@ -565,7 +569,7 @@ export default function CartDrawer() {
                     <span className="font-medium">Transferencia Bancaria</span>
                   </label>
                 )}
-                {settings.cash_pickup_enabled && (
+                {settings.cash_pickup_enabled !== false && (
                   <label className="flex items-center gap-2.5 p-2.5 border rounded-lg cursor-pointer text-sm">
                     <input
                       type="radio"
@@ -619,7 +623,7 @@ export default function CartDrawer() {
                 type="submit"
                 disabled={submitting}
                 className="w-full mt-3 py-3 rounded-xl text-white font-bold text-sm transition opacity-95 hover:opacity-100 disabled:opacity-50"
-                style={{ backgroundColor: "var(--store-primary)" }}
+                style={{ backgroundColor: "var(--color-primary, #0f172a)" }}
               >
                 {submitting
                   ? "Procesando..."

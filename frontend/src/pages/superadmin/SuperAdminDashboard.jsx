@@ -5,7 +5,7 @@ import { useAuth } from "../../context/AuthContext.jsx";
 import api from "../../config/api.js";
 
 export default function SuperAdminDashboard() {
-  const { user, isAuthenticated, logout } = useAuth();
+  const { user, isAuthenticated, logout, startImpersonation } = useAuth();
   const navigate = useNavigate();
 
   const [stores, setStores] = useState([]);
@@ -99,9 +99,21 @@ export default function SuperAdminDashboard() {
     try {
       const res = await api.post(`/superadmin/stores/${storeId}/impersonate`);
       const { token, user: storeUser } = res.data.data;
-      localStorage.setItem("token", token);
-      localStorage.setItem("user", JSON.stringify(storeUser));
-      window.location.href = "/admin/dashboard";
+      if (startImpersonation) {
+        startImpersonation(token, storeUser);
+      } else {
+        localStorage.setItem(
+          "superadmin_backup_token",
+          localStorage.getItem("token") || "",
+        );
+        localStorage.setItem(
+          "superadmin_backup_user",
+          localStorage.getItem("user") || "",
+        );
+        localStorage.setItem("token", token);
+        localStorage.setItem("user", JSON.stringify(storeUser));
+      }
+      navigate("/admin/dashboard");
     } catch (err) {
       alert(err.response?.data?.message || "No se pudo ingresar a la tienda");
     }
