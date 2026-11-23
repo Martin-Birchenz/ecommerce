@@ -18,13 +18,12 @@ export default function CartDrawer() {
   const {
     items = [],
     subtotal = 0,
-    updateQty = () => {},
+    isOpen = false,
+    setIsOpen = () => {},
+    updateQuantity = () => {},
     removeItem = () => {},
     clearCart = () => {},
   } = cart;
-
-  const isOpen = cart.isOpen ?? cart.isCartOpen ?? false;
-  const setIsOpen = cart.setIsOpen || cart.setIsCartOpen || (() => {});
 
   const { slug, store } = useStore() || {};
   const settings = store?.settings || store || {};
@@ -323,66 +322,69 @@ export default function CartDrawer() {
           >
             {/* Items */}
             <div className="space-y-3">
-              {items.map((item) => (
-                <div
-                  key={item.variant_id}
-                  className="flex gap-3 items-center bg-slate-50 p-3 rounded-xl border"
-                >
-                  <img
-                    src={
-                      item.image_url || "https://placehold.co/80x80?text=Item"
-                    }
-                    alt={item.product_name}
-                    className="w-14 h-14 rounded-lg object-cover bg-white"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-sm text-slate-900 truncate">
-                      {item.product_name}
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      {item.variant_label}
-                    </p>
-                    <p className="text-xs font-bold text-slate-800 mt-0.5">
-                      $
-                      {(item.unit_price * item.quantity).toLocaleString(
-                        "es-AR",
-                      )}
-                    </p>
-                  </div>
+              {items.map((item) => {
+                const title = item.name || item.product_name || "Producto";
+                return (
+                  <div
+                    key={item.variant_id}
+                    className="flex gap-3 items-center bg-slate-50 p-3 rounded-xl border"
+                  >
+                    <img
+                      src={
+                        item.image_url || "https://placehold.co/80x80?text=Item"
+                      }
+                      alt={title}
+                      className="w-14 h-14 rounded-lg object-cover bg-white"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-sm text-slate-900 truncate">
+                        {title}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {item.variant_label}
+                      </p>
+                      <p className="text-xs font-bold text-slate-800 mt-0.5">
+                        $
+                        {(item.unit_price * item.quantity).toLocaleString(
+                          "es-AR",
+                        )}
+                      </p>
+                    </div>
 
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        updateQty(item.variant_id, item.quantity - 1)
-                      }
-                      className="w-7 h-7 rounded border bg-white flex items-center justify-center"
-                    >
-                      <Minus className="w-3.5 h-3.5" />
-                    </button>
-                    <span className="text-xs font-bold w-5 text-center">
-                      {item.quantity}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        updateQty(item.variant_id, item.quantity + 1)
-                      }
-                      disabled={item.quantity >= item.max_stock}
-                      className="w-7 h-7 rounded border bg-white flex items-center justify-center disabled:opacity-40"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => removeItem(item.variant_id)}
-                      className="p-1.5 text-slate-400 hover:text-red-600"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateQuantity(item.variant_id, item.quantity - 1)
+                        }
+                        className="w-7 h-7 rounded border bg-white flex items-center justify-center"
+                      >
+                        <Minus className="w-3.5 h-3.5" />
+                      </button>
+                      <span className="text-xs font-bold w-5 text-center">
+                        {item.quantity}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateQuantity(item.variant_id, item.quantity + 1)
+                        }
+                        disabled={item.quantity >= item.max_stock}
+                        className="w-7 h-7 rounded border bg-white flex items-center justify-center disabled:opacity-40"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeItem(item.variant_id)}
+                        className="p-1.5 text-slate-400 hover:text-red-600"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             {/* Cupón de Descuento */}
