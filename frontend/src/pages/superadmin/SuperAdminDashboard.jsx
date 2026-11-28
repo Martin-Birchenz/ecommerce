@@ -1,8 +1,5 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, ExternalLink, Store, LogOut, ShieldCheck } from "lucide-react";
-import { useAuth } from "../../context/AuthContext.jsx";
-import api from "../../config/api.js";
 import {
   Plus,
   ExternalLink,
@@ -10,139 +7,142 @@ import {
   LogOut,
   ShieldCheck,
   Loader2,
+  Search,
   Package,
   ShoppingBag,
   ArrowUpRight,
+  X,
 } from "lucide-react";
+import api from "../../config/api.js";
+import { useAuth } from "../../context/AuthContext.jsx";
+
+const slugify = (text) =>
+  text
+    .toString()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)+/g, "");
 
 export default function SuperAdminDashboard() {
-  const { user, isAuthenticated, logout, startImpersonation } = useAuth();
+  const { logout, impersonateStore } = useAuth();
   const navigate = useNavigate();
 
   const [stores, setStores] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+
   const [showModal, setShowModal] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [impersonatingId, setImpersonatingId] = useState(null);
   const [error, setError] = useState("");
 
   const [form, setForm] = useState({
     name: "",
     slug: "",
-    business_category: "general",
-    whatsapp_number: "549",
+    whatsapp_number: "",
     admin_name: "",
     admin_email: "",
     admin_password: "",
-    primary_color: "#0F172A",
-    secondary_color: "#2563EB",
-    accent_color: "#10B981",
   });
 
   const loadStores = async () => {
     setLoading(true);
     try {
       const res = await api.get("/superadmin/stores");
-      setStores(res.data.data || []);
+      setStores(res.data?.data || []);
+    } catch (err) {
+      console.error("Error cargando tiendas:", err);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    if (isAuthenticated && user?.role === "superadmin") {
-      loadStores();
-    }
-  }, [isAuthenticated, user?.role]);
+    loadStores();
+  }, []);
 
-  const handleNameChange = (value) => {
-    const generatedSlug = value
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/(^-|-$)+/g, "");
-    setForm((prev) => ({ ...prev, name: value, slug: generatedSlug }));
+  const handleNameChange = (val) => {
+    setForm((prev) => ({
+      ...prev,
+      name: val,
+      slug: slugify(val),
+    }));
   };
 
   const handleCreateStore = async (e) => {
     e.preventDefault();
-    setCreating(true);
     setError("");
+    setCreating(true);
     try {
       await api.post("/superadmin/stores", form);
       setShowModal(false);
       setForm({
         name: "",
         slug: "",
-        business_category: "general",
-        whatsapp_number: "549",
+        whatsapp_number: "",
         admin_name: "",
         admin_email: "",
         admin_password: "",
-        primary_color: "#0F172A",
-        secondary_color: "#2563EB",
-        accent_color: "#10B981",
       });
       await loadStores();
     } catch (err) {
-      setError(err.response?.data?.message || "No se pudo crear el comercio");
+      setError(
+        err.response?.data?.message || "No se pudo crear el nuevo comercio",
+      );
     } finally {
       setCreating(false);
     }
   };
 
-  const handleStatusChange = async (storeId, planStatus) => {
-    await api.patch(`/superadmin/stores/${storeId}/status`, {
-      plan_status: planStatus,
-    });
-    setStores((prev) =>
-      prev.map((s) =>
-        s.id === storeId ? { ...s, plan_status: planStatus } : s,
-      ),
-    );
-  };
-
-  const handleImpersonate = async (storeId) => {
+  const handleStatusChange = async (storeId, plan_status) => {
     try {
-      const res = await api.post(`/superadmin/stores/${storeId}/impersonate`);
-      const { token, user: storeUser } = res.data.data;
-
-      if (startImpersonation) {
-        startImpersonation(token, storeUser);
-      } else {
-        localStorage.setItem(
-          "superadmin_backup_token",
-          localStorage.getItem("token") || "",
-        );
-        localStorage.setItem(
-          "superadmin_backup_user",
-          localStorage.getItem("user") || "",
-        );
-        localStorage.setItem("token", token);
-        localStorage.setItem("user", JSON.stringify(storeUser));
-      }
-
-      window.location.href = "/admin/dashboard";
+      await api.patch(`/superadmin/stores/${storeId}/status`, { plan_status });
+      setStores((prev) =>
+        prev.map((s) => (s.id === storeId ? { ...s, plan_status } : s)),
+      );
     } catch (err) {
-      alert(err.response?.data?.message || "No se pudo ingresar a la tienda");
+      alert(err.response?.data?.message || "No se pudo actualizar el estado");
     }
   };
 
+  const handleImpersonate = async (storeId) => {
+    setImpersonatingId(storeId);
+    try {
+      await impersonateStore(storeId);
+      navigate("/admin");
+    } catch (err) {
+      alert(err.response?.data?.message || "No se pudo ingresar a la tienda");
+      setImpersonatingId(null);
+    }
+  };
+
+  const filteredStores = stores.filter((s) => {
+    const matchesSearch =
+      s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      s.slug.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesStatus =
+      statusFilter === "all" || s.plan_status === statusFilter;
+    return matchesSearch && matchesStatus;
+  });
+
   return (
-    <div className="min-h-screen bg-slate-100/70">
-      {/* Topbar SuperAdmin */}
-      <header className="sticky top-0 z-30 bg-slate-950/95 backdrop-blur-md text-white px-6 py-4 border-b border-slate-800">
+    <div className="min-h-screen bg-[#0B0F19] text-slate-100">
+      {/* Topbar */}
+      <header className="sticky top-0 z-30 bg-[#0B0F19]/90 backdrop-blur-md border-b border-white/10 px-6 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-400/30 flex items-center justify-center">
-              <ShieldCheck className="w-5 h-5 text-emerald-400" />
+            <div className="w-10 h-10 rounded-xl bg-emerald-500 text-slate-950 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+              <ShieldCheck className="w-5 h-5 stroke-[2.5]" />
             </div>
             <div>
-              <h1 className="font-extrabold text-base tracking-tight leading-tight">
+              <h1 className="font-extrabold text-base text-white tracking-tight">
                 Control Central SaaS
               </h1>
               <p className="text-xs text-slate-400">
-                Consola Maestra Multi-Tenant
+                Administración Multi-Tenant
               </p>
             </div>
           </div>
@@ -153,272 +153,307 @@ export default function SuperAdminDashboard() {
               logout();
               navigate("/admin/login");
             }}
-            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs font-semibold text-slate-300 hover:text-white transition cursor-pointer"
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-slate-300 hover:text-white transition cursor-pointer"
           >
-            <LogOut className="w-4 h-4" /> Cerrar sesión
+            <LogOut className="w-4 h-4" /> Salir
           </button>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto p-6 sm:p-8 space-y-8">
-        {/* Encabezado + Métricas Globales */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+        {/* Hero Header */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
-              Comercios Registrados
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+              Ecosistema de Comercios
             </h2>
-            <p className="text-sm text-slate-500 mt-1">
-              Desplegá nuevas tiendas en 1 clic, controlá suscripciones o
-              ingresá en modo soporte.
+            <p className="text-sm text-slate-400 mt-1">
+              Desplegá nuevas instancias en segundos o ingresá en modo soporte.
             </p>
           </div>
 
           <button
             type="button"
-            onClick={() => setShowModal(!showModal)}
-            className="inline-flex items-center justify-center gap-2 px-5 py-3 bg-slate-900 text-white text-sm font-bold rounded-xl hover:bg-slate-800 shadow-sm transition cursor-pointer"
+            onClick={() => setShowModal(true)}
+            className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-sm shadow-lg shadow-emerald-500/20 transition cursor-pointer"
           >
-            <Plus className="w-4 h-4" />
-            {showModal ? "Cerrar Formulario" : "Nuevo Comercio"}
+            <Plus className="w-4 h-4 stroke-[2.5]" /> Nuevo Comercio
           </button>
         </div>
 
-        {/* Barra de Resumen SaaS */}
-        {!loading && (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs flex items-center justify-between">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                  Tiendas Totales
-                </p>
-                <p className="text-2xl font-extrabold text-slate-900 mt-1">
-                  {stores.length}
-                </p>
-              </div>
-              <div className="w-11 h-11 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center">
-                <Store className="w-5 h-5" />
-              </div>
+        {/* Métricas */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="rounded-2xl bg-white/[0.04] border border-white/10 p-5 flex items-center justify-between">
+            <div>
+              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                Comercios Totales
+              </span>
+              <p className="text-3xl font-extrabold text-white mt-1">
+                {loading ? "—" : stores.length}
+              </p>
             </div>
-
-            <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs flex items-center justify-between">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                  Instancias Activas / Demo
-                </p>
-                <p className="text-2xl font-extrabold text-emerald-600 mt-1">
-                  {stores.filter((s) => s.plan_status !== "suspended").length}
-                </p>
-              </div>
-              <div className="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-                <ShieldCheck className="w-5 h-5" />
-              </div>
-            </div>
-
-            <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs flex items-center justify-between">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                  Pedidos Procesados
-                </p>
-                <p className="text-2xl font-extrabold text-slate-900 mt-1">
-                  {stores.reduce(
-                    (acc, s) => acc + Number(s.total_orders || 0),
-                    0,
-                  )}
-                </p>
-              </div>
-              <div className="w-11 h-11 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
-                <ShoppingBag className="w-5 h-5" />
-              </div>
+            <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center text-slate-300">
+              <Store className="w-6 h-6" />
             </div>
           </div>
-        )}
 
-        {/* Formulario de Alta de Comercio */}
-        {showModal && (
-          <form
-            onSubmit={handleCreateStore}
-            className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 space-y-5 text-sm shadow-lg"
-          >
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div>
-                <h3 className="font-extrabold text-lg text-slate-900">
-                  Dar de Alta Nuevo Cliente
-                </h3>
-                <p className="text-xs text-slate-500">
-                  Se creará la instancia, configuración inicial y usuario
-                  administrador.
-                </p>
-              </div>
+          <div className="rounded-2xl bg-white/[0.04] border border-white/10 p-5 flex items-center justify-between">
+            <div>
+              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                Activos / Demo
+              </span>
+              <p className="text-3xl font-extrabold text-emerald-400 mt-1">
+                {loading
+                  ? "—"
+                  : stores.filter((s) => s.plan_status !== "suspended").length}
+              </p>
             </div>
-
-            {error && (
-              <div className="p-3.5 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs font-medium">
-                {error}
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-xs font-bold uppercase text-slate-600 mb-1.5">
-                  Nombre del Comercio *
-                </label>
-                <input
-                  required
-                  type="text"
-                  value={form.name}
-                  onChange={(e) => handleNameChange(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-slate-900 outline-none"
-                  placeholder="Ej: Vinoteca El Roble"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold uppercase text-slate-600 mb-1.5">
-                  Slug URL (/t/slug) *
-                </label>
-                <input
-                  required
-                  type="text"
-                  value={form.slug}
-                  onChange={(e) => setForm({ ...form, slug: e.target.value })}
-                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-xs focus:bg-white focus:border-slate-900 outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold uppercase text-slate-600 mb-1.5">
-                  WhatsApp Comercio *
-                </label>
-                <input
-                  required
-                  type="text"
-                  value={form.whatsapp_number}
-                  onChange={(e) =>
-                    setForm({ ...form, whatsapp_number: e.target.value })
-                  }
-                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-slate-900 outline-none"
-                  placeholder="5493435..."
-                />
-              </div>
+            <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 flex items-center justify-center text-emerald-400">
+              <ShieldCheck className="w-6 h-6" />
             </div>
+          </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-3 border-t border-slate-100">
-              <div>
-                <label className="block text-xs font-bold uppercase text-slate-600 mb-1.5">
-                  Nombre del Dueño *
-                </label>
-                <input
-                  required
-                  type="text"
-                  value={form.admin_name}
-                  onChange={(e) =>
-                    setForm({ ...form, admin_name: e.target.value })
-                  }
-                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-slate-900 outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold uppercase text-slate-600 mb-1.5">
-                  Email de Acceso Admin *
-                </label>
-                <input
-                  required
-                  type="email"
-                  value={form.admin_email}
-                  onChange={(e) =>
-                    setForm({ ...form, admin_email: e.target.value })
-                  }
-                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-slate-900 outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold uppercase text-slate-600 mb-1.5">
-                  Contraseña Inicial *
-                </label>
-                <input
-                  required
-                  type="text"
-                  value={form.admin_password}
-                  onChange={(e) =>
-                    setForm({ ...form, admin_password: e.target.value })
-                  }
-                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-slate-900 outline-none"
-                  placeholder="Mínimo 6 caracteres"
-                />
-              </div>
+          <div className="rounded-2xl bg-white/[0.04] border border-white/10 p-5 flex items-center justify-between">
+            <div>
+              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                Pedidos Globales
+              </span>
+              <p className="text-3xl font-extrabold text-white mt-1">
+                {loading
+                  ? "—"
+                  : stores.reduce(
+                      (acc, s) => acc + Number(s.total_orders || 0),
+                      0,
+                    )}
+              </p>
             </div>
+            <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 flex items-center justify-center text-indigo-400">
+              <ShoppingBag className="w-6 h-6" />
+            </div>
+          </div>
+        </div>
 
-            <div className="flex justify-end gap-3 pt-2">
+        {/* Barra de Búsqueda y Filtros */}
+        <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
+          <div className="relative flex-1 max-w-md">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="Buscar por nombre o slug..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder-slate-500 outline-none focus:border-emerald-400"
+            />
+          </div>
+
+          <div className="flex gap-1.5 flex-wrap">
+            {[
+              { id: "all", label: "Todos" },
+              { id: "active", label: "Activos" },
+              { id: "demo", label: "Demo" },
+              { id: "suspended", label: "Suspendidos" },
+            ].map((tab) => (
               <button
+                key={tab.id}
                 type="button"
-                onClick={() => setShowModal(false)}
-                className="px-4 py-2.5 border border-slate-200 rounded-xl font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+                onClick={() => setStatusFilter(tab.id)}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+                  statusFilter === tab.id
+                    ? "bg-emerald-500 text-slate-950"
+                    : "bg-white/5 text-slate-400 hover:text-white border border-white/10"
+                }`}
               >
-                Cancelar
+                {tab.label}
               </button>
-              <button
-                type="submit"
-                disabled={creating}
-                className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold cursor-pointer disabled:opacity-60 inline-flex items-center gap-2"
-              >
-                {creating && <Loader2 className="w-4 h-4 animate-spin" />}
-                {creating ? "Creando instancia..." : "Crear Tienda y Usuario"}
-              </button>
-            </div>
-          </form>
+            ))}
+          </div>
+        </div>
+
+        {/* Modal Alta de Comercio */}
+        {showModal && (
+          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+            <form
+              onSubmit={handleCreateStore}
+              className="w-full max-w-2xl rounded-3xl bg-slate-900 border border-white/15 p-6 sm:p-8 space-y-5 text-sm shadow-2xl"
+            >
+              <div className="flex items-center justify-between border-b border-white/10 pb-4">
+                <div>
+                  <h3 className="font-extrabold text-lg text-white">
+                    Alta de Nuevo Comercio
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Creación automática de tienda, tema inicial y administrador.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowModal(false)}
+                  className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/10"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {error && (
+                <div className="p-3 rounded-xl bg-red-500/15 border border-red-500/30 text-red-300 text-xs">
+                  {error}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Nombre Comercio *
+                  </label>
+                  <input
+                    required
+                    type="text"
+                    value={form.name}
+                    onChange={(e) => handleNameChange(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white outline-none focus:border-emerald-400"
+                    placeholder="Ej: Vinoteca El Roble"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Slug (/t/slug) *
+                  </label>
+                  <input
+                    required
+                    type="text"
+                    value={form.slug}
+                    onChange={(e) => setForm({ ...form, slug: e.target.value })}
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-emerald-300 font-mono text-xs outline-none focus:border-emerald-400"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    WhatsApp *
+                  </label>
+                  <input
+                    required
+                    type="text"
+                    value={form.whatsapp_number}
+                    onChange={(e) =>
+                      setForm({ ...form, whatsapp_number: e.target.value })
+                    }
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white outline-none focus:border-emerald-400"
+                    placeholder="5493435..."
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-3 border-t border-white/10">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Nombre Dueño *
+                  </label>
+                  <input
+                    required
+                    type="text"
+                    value={form.admin_name}
+                    onChange={(e) =>
+                      setForm({ ...form, admin_name: e.target.value })
+                    }
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white outline-none focus:border-emerald-400"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Email Admin *
+                  </label>
+                  <input
+                    required
+                    type="email"
+                    value={form.admin_email}
+                    onChange={(e) =>
+                      setForm({ ...form, admin_email: e.target.value })
+                    }
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white outline-none focus:border-emerald-400"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Contraseña *
+                  </label>
+                  <input
+                    required
+                    type="text"
+                    value={form.admin_password}
+                    onChange={(e) =>
+                      setForm({ ...form, admin_password: e.target.value })
+                    }
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white outline-none focus:border-emerald-400"
+                    placeholder="Mínimo 6 caracteres"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setShowModal(false)}
+                  className="px-4 py-2.5 rounded-xl border border-white/10 text-slate-300 hover:bg-white/5 font-semibold cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={creating}
+                  className="px-6 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold cursor-pointer disabled:opacity-60 inline-flex items-center gap-2"
+                >
+                  {creating && <Loader2 className="w-4 h-4 animate-spin" />}
+                  {creating ? "Creando tienda..." : "Crear Tienda"}
+                </button>
+              </div>
+            </form>
+          </div>
         )}
 
-        {/* Listado de Tiendas con Spinner de Carga */}
+        {/* Listado de Tiendas */}
         {loading ? (
-          <div className="bg-white border border-slate-200/80 rounded-2xl p-16 flex flex-col items-center justify-center gap-3">
-            <Loader2 className="w-8 h-8 text-slate-900 animate-spin" />
-            <p className="text-sm font-semibold text-slate-600">
-              Cargando comercios registrados...
+          <div className="rounded-3xl bg-white/[0.03] border border-white/10 py-20 flex flex-col items-center justify-center gap-3">
+            <Loader2 className="w-9 h-9 text-emerald-400 animate-spin" />
+            <p className="text-sm font-medium text-slate-400">
+              Cargando instancias registradas...
             </p>
           </div>
-        ) : stores.length === 0 ? (
-          <div className="bg-white border border-slate-200 rounded-2xl p-14 text-center space-y-2">
-            <Store className="w-10 h-10 text-slate-300 mx-auto" />
-            <p className="font-bold text-slate-800">
-              Todavía no hay comercios creados
-            </p>
-            <p className="text-xs text-slate-500">
-              Hacé clic en &ldquo;Nuevo Comercio&rdquo; para lanzar tu primera
-              tienda.
+        ) : filteredStores.length === 0 ? (
+          <div className="rounded-3xl bg-white/[0.03] border border-white/10 py-16 text-center space-y-2">
+            <Store className="w-10 h-10 text-slate-600 mx-auto" />
+            <p className="font-bold text-slate-300">
+              No se encontraron comercios con ese filtro
             </p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {stores.map((s) => {
-              const statusColors = {
-                active: "bg-emerald-50 text-emerald-700 border-emerald-200",
-                demo: "bg-amber-50 text-amber-700 border-amber-200",
-                suspended: "bg-red-50 text-red-700 border-red-200",
-              };
-
+            {filteredStores.map((s) => {
+              const isEntering = impersonatingId === s.id;
               return (
                 <div
                   key={s.id}
-                  className="bg-white border border-slate-200/90 rounded-2xl p-5 flex flex-col justify-between gap-5 shadow-xs hover:shadow-md transition-shadow"
+                  className="rounded-2xl bg-white/[0.04] hover:bg-white/[0.06] border border-white/10 p-5 flex flex-col justify-between gap-5 transition"
                 >
                   <div>
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-center gap-3 min-w-0">
                         <div
-                          className="w-11 h-11 rounded-xl flex items-center justify-center text-white font-bold shrink-0 shadow-xs"
+                          className="w-11 h-11 rounded-xl flex items-center justify-center text-white font-bold shrink-0 shadow-md"
                           style={{
-                            backgroundColor: s.primary_color || "#0F172A",
+                            backgroundColor: s.primary_color || "#10B981",
                           }}
                         >
                           <Store className="w-5 h-5" />
                         </div>
                         <div className="min-w-0">
-                          <h3 className="font-extrabold text-slate-900 truncate">
+                          <h3 className="font-extrabold text-white truncate">
                             {s.name}
                           </h3>
-                          <p className="text-xs font-mono text-slate-500 truncate">
+                          <p className="text-xs font-mono text-slate-400 truncate">
                             /t/{s.slug}
                           </p>
                         </div>
@@ -429,10 +464,7 @@ export default function SuperAdminDashboard() {
                         onChange={(e) =>
                           handleStatusChange(s.id, e.target.value)
                         }
-                        className={`text-xs font-bold border rounded-lg px-2.5 py-1 cursor-pointer outline-none ${
-                          statusColors[s.plan_status] ||
-                          "bg-slate-50 text-slate-700"
-                        }`}
+                        className="text-xs font-bold rounded-lg px-2.5 py-1.5 bg-slate-900 border border-white/15 text-slate-200 cursor-pointer outline-none"
                       >
                         <option value="demo">Demo</option>
                         <option value="active">Activo</option>
@@ -440,24 +472,24 @@ export default function SuperAdminDashboard() {
                       </select>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3 mt-5 pt-4 border-t border-slate-100">
-                      <div className="bg-slate-50 rounded-xl p-2.5 flex items-center gap-2">
+                    <div className="grid grid-cols-2 gap-3 mt-5 pt-4 border-t border-white/10">
+                      <div className="rounded-xl bg-black/30 p-3 flex items-center gap-2.5">
                         <Package className="w-4 h-4 text-slate-400" />
                         <div className="text-xs">
-                          <span className="text-slate-500 block">
+                          <span className="text-slate-400 block">
                             Productos
                           </span>
-                          <strong className="text-slate-900 text-sm">
+                          <strong className="text-white text-sm">
                             {s.total_products ?? 0}
                           </strong>
                         </div>
                       </div>
 
-                      <div className="bg-slate-50 rounded-xl p-2.5 flex items-center gap-2">
+                      <div className="rounded-xl bg-black/30 p-3 flex items-center gap-2.5">
                         <ShoppingBag className="w-4 h-4 text-slate-400" />
                         <div className="text-xs">
-                          <span className="text-slate-500 block">Pedidos</span>
-                          <strong className="text-slate-900 text-sm">
+                          <span className="text-slate-400 block">Pedidos</span>
+                          <strong className="text-white text-sm">
                             {s.total_orders ?? 0}
                           </strong>
                         </div>
@@ -468,18 +500,28 @@ export default function SuperAdminDashboard() {
                   <div className="space-y-2">
                     <button
                       type="button"
+                      disabled={isEntering}
                       onClick={() => handleImpersonate(s.id)}
-                      className="w-full py-2.5 rounded-xl bg-slate-900 text-white text-xs font-bold hover:bg-slate-800 transition cursor-pointer flex items-center justify-center gap-1.5"
+                      className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-extrabold transition cursor-pointer disabled:opacity-60 flex items-center justify-center gap-1.5"
                     >
-                      <span>Administrar Tienda</span>
-                      <ArrowUpRight className="w-3.5 h-3.5" />
+                      {isEntering ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Entrando a la tienda...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>Administrar Tienda</span>
+                          <ArrowUpRight className="w-3.5 h-3.5" />
+                        </>
+                      )}
                     </button>
 
                     <a
                       href={`/t/${s.slug}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="w-full py-2.5 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 flex items-center justify-center gap-1.5 hover:bg-slate-50 transition"
+                      className="w-full py-2.5 rounded-xl border border-white/10 hover:bg-white/5 text-slate-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition"
                     >
                       <span>Abrir Tienda Pública</span>
                       <ExternalLink className="w-3.5 h-3.5" />
